@@ -56,6 +56,10 @@ class JiraConfig:
     auth_type: str = AUTH_TYPE_BEARER
     email: str | None = None
     extras: dict[str, Any] | None = None
+    # Jira Cloud site id, for the api.atlassian.com gateway that scoped
+    # API tokens must use.  None works it out on first use; "site"
+    # forces the site URL.
+    cloud_id: str | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization.
@@ -162,6 +166,7 @@ class JiraConfig:
             auth_type=auth_type,
             email=email,
             extras=data,
+            cloud_id=data.get("cloud_id"),
         )
 
 
@@ -294,6 +299,19 @@ def load_config(
             # Also update nested auth token so from_dict picks it up
             if "auth" in config_data and isinstance(config_data["auth"], dict):
                 config_data["auth"]["token"] = env_token
+
+        # Jira Cloud takes an API token only with the account email, as
+        # basic auth: a .env set (or --user) naming a Cloud server and
+        # JIRA_CLOUD_EMAIL needs no JSON config to say so.
+        env_email = os.environ.get("JIRA_CLOUD_EMAIL")
+        env_cloud_id = os.environ.get("JIRA_CLOUD_ID")
+        if env_email and ".atlassian.net" in config_data.get("server", ""):
+            token = config_data.get("token") or (
+                config_data.get("auth") or {}).get("token", "")
+            config_data["auth"] = {
+                "type": AUTH_TYPE_BASIC, "email": env_email, "token": token}
+        if env_cloud_id:
+            config_data["cloud_id"] = env_cloud_id
 
     # Apply explicit overrides
     if server_override:

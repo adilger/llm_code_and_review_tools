@@ -77,6 +77,10 @@ JIRA_CLOUD_PROJECTS="PROJ1,PROJ2"   # comma-separated project prefixes
 **Token generation:**
 - Server PAT: JIRA → Profile → Personal Access Tokens
 - Cloud API token: `id.atlassian.com/manage-profile/security/api-tokens`
+- A `.env` set with a Cloud `JIRA_SERVER` and `JIRA_CLOUD_EMAIL` uses
+  basic auth; scoped Cloud tokens are routed through
+  `api.atlassian.com/ex/jira/<cloud id>` automatically
+  (`JIRA_CLOUD_ID` to pin it, `site` to disable)
 
 Run `jira --help` for full command list.
 

@@ -106,8 +106,11 @@ CLOUD = "https://example.atlassian.net/rest/api/3"
 
 @pytest.fixture
 def cloud_client():
+    # cloud_id="site": these tests are not about routing, and a scoped-
+    # token probe of /myself would be the first call they inspect.
     return JiraClient(JiraConfig(server="https://example.atlassian.net", token="t",
-                                 auth_type="basic", email="a@example.com"))
+                                 auth_type="basic", email="a@example.com",
+                                 cloud_id="site"))
 
 
 class TestReplies:

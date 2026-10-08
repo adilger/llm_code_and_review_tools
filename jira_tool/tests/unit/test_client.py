@@ -1,7 +1,7 @@
 """Unit tests for JIRA client."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import requests
@@ -89,6 +89,66 @@ class TestBuildUrl:
         """Should handle leading slash."""
         url = client._build_url("/issue/PROJ-123")
         assert url == "https://jira.example.com/rest/api/2/issue/PROJ-123"
+
+
+class TestCloudApiRoot:
+    """Scoped Cloud API tokens go through the api.atlassian.com gateway."""
+
+    @staticmethod
+    def _cloud(**kwargs):
+        return JiraClient(JiraConfig(
+            server="https://myorg.atlassian.net", token="api-token",
+            auth_type="basic", email="user@example.com", **kwargs))
+
+    def test_configured_cloud_id_uses_gateway(self):
+        client = self._cloud(cloud_id="abc-123")
+        with patch.object(client._session, "get") as probe:
+            url = client._build_url("issue/NTAP-10")
+        probe.assert_not_called()
+        assert url == ("https://api.atlassian.com/ex/jira/abc-123"
+                       "/rest/api/3/issue/NTAP-10")
+
+    def test_site_cloud_id_forces_site_url(self):
+        client = self._cloud(cloud_id="site")
+        assert client._build_url("issue/X-1") == (
+            "https://myorg.atlassian.net/rest/api/3/issue/X-1")
+
+    def test_classic_token_stays_on_site(self):
+        client = self._cloud()
+        with patch.object(client._session, "get",
+                          return_value=Mock(status_code=200)):
+            url = client._build_url("issue/X-1")
+        assert url == "https://myorg.atlassian.net/rest/api/3/issue/X-1"
+
+    def test_scoped_token_looks_up_cloud_id_once(self):
+        client = self._cloud()
+        info = Mock(status_code=200)
+        info.json.return_value = {"cloudId": "abc-123"}
+        with patch.object(client._session, "get",
+                          return_value=Mock(status_code=401)) as probe, \
+                patch("jira_tool.client.requests.get",
+                      return_value=info) as lookup:
+            client._build_url("issue/X-1")
+            url = client._build_url("issue/X-2")
+        assert probe.call_count == 1 and lookup.call_count == 1
+        assert lookup.call_args[0][0] == (
+            "https://myorg.atlassian.net/_edge/tenant_info")
+        assert url == ("https://api.atlassian.com/ex/jira/abc-123"
+                       "/rest/api/3/issue/X-2")
+
+    def test_failed_lookup_falls_back_to_site(self):
+        client = self._cloud()
+        with patch.object(client._session, "get",
+                          return_value=Mock(status_code=401)), \
+                patch("jira_tool.client.requests.get",
+                      side_effect=requests.exceptions.ConnectionError):
+            url = client._build_url("issue/X-1")
+        assert url == "https://myorg.atlassian.net/rest/api/3/issue/X-1"
+
+    def test_bearer_on_server_never_probes(self, client):
+        with patch.object(client._session, "get") as probe:
+            client._build_url("issue/X-1")
+        probe.assert_not_called()
 
 
 class TestGetIssue:

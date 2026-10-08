@@ -126,7 +126,8 @@ def _get_cloud_projects() -> set[str]:
 def _build_cloud_client(ctx: click.Context) -> JiraClient:
     """Build a JiraClient pointing at the JIRA Cloud instance.
 
-    Uses JIRA_CLOUD_SERVER, JIRA_CLOUD_EMAIL, and JIRA_CLOUD_TOKEN env vars.
+    Uses JIRA_CLOUD_SERVER, JIRA_CLOUD_EMAIL, and JIRA_CLOUD_TOKEN env vars,
+    and JIRA_CLOUD_ID if set.
     """
     server = os.environ.get("JIRA_CLOUD_SERVER", "")
     token = os.environ.get("JIRA_CLOUD_TOKEN", "")
@@ -144,6 +145,7 @@ def _build_cloud_client(ctx: click.Context) -> JiraClient:
         token=token,
         auth_type=AUTH_TYPE_BASIC,
         email=email or None,
+        cloud_id=os.environ.get("JIRA_CLOUD_ID") or None,
     )
     ctx.obj["config"] = config
     return JiraClient(config, debug=ctx.obj.get("debug", False))

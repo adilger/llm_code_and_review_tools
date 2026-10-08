@@ -39,6 +39,25 @@ routed to the Cloud instance defined by the `JIRA_CLOUD_SERVER`,
 `JIRA_CLOUD_EMAIL`, and `JIRA_CLOUD_TOKEN` environment variables; an
 explicit `-I` overrides auto-routing.
 
+Jira Cloud (`*.atlassian.net`) takes an API token only as basic auth
+with the account email.  A `.env` set naming a Cloud `JIRA_SERVER` with
+`JIRA_CLOUD_EMAIL` beside its `JIRA_TOKEN` does that by itself:
+
+```
+[cloud]
+JIRA_SERVER=https://your-org.atlassian.net
+JIRA_CLOUD_EMAIL=user@example.com
+JIRA_TOKEN=<Atlassian API token>
+```
+
+then `jira -U cloud get PROJ-1`.  An API token created with scopes
+works only through the `api.atlassian.com/ex/jira/<cloud id>` gateway;
+the site URL refuses it and reports its issues as missing.  The tool
+spots such a token (the site answers 401 to `/myself`), looks up the
+site's cloud id and uses the gateway, at the cost of two extra requests
+per command.  Set `JIRA_CLOUD_ID` (or `"cloud_id"` in a JSON instance)
+to skip the lookup, or to `site` to always use the site URL.
+
 ## Quick Start
 
 ```bash
