@@ -73,7 +73,10 @@ def _maloo_for_change(client, change_number, patchset=None):
 
                 if kind == 'enforced':
                     if test_name not in enforced_results:
-                        enforced_results[test_name] = {'pass': [], 'fail': []}
+                        enforced_results[test_name] = {
+                            'pass': [], 'fail': [], 'last': ''}
+                    r = enforced_results[test_name]
+                    r['last'] = max(r['last'], m.get('date', ''))
                     bucket = 'pass' if status == 'Passed' else 'fail'
                     entry = {'platform': platform, 'url': url}
                     if test_detail:
@@ -85,11 +88,13 @@ def _maloo_for_change(client, change_number, patchset=None):
                         entry['detail'] = test_detail
                     optional_failed.append(entry)
 
+    # A retest is pending only while it is newer than the group's latest
+    # verdict. After the retest runs, Maloo posts a new verdict.
     retested_groups = set()
     for rt in retests:
         msg = rt['message'].lower()
-        for test_name in enforced_results:
-            if test_name.lower() in msg:
+        for test_name, r in enforced_results.items():
+            if test_name.lower() in msg and rt['date'] > r['last']:
                 retested_groups.add(test_name)
 
     enforced_summary = []
