@@ -42,6 +42,7 @@ def cmd_review(args):
             url=args.url,
             include_file_content=args.full_content,
             context_lines=context_lines,
+            base=getattr(args, 'base', None),
         )
 
         # Posting mode.  Any of --post-comments/--vote/--message means

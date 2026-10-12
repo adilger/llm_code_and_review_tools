@@ -33,6 +33,7 @@ Example usage:
     )
 """
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from urllib.parse import quote
@@ -80,6 +81,96 @@ class DiffHunk:
         return "\n".join(lines)
 
 
+def _is_change(section: dict) -> bool:
+    return "a" in section or "b" in section
+
+
+def content_to_hunks(
+    content: list[dict], context_lines: Optional[int] = 3,
+) -> list[DiffHunk]:
+    """Turn a Gerrit DiffInfo content list into unified diff hunks.
+
+    Gerrit returns every unchanged line of the file and ignores the
+    diff endpoint's context parameter, so the context is cut here:
+    context_lines unchanged lines are kept on each side of a change,
+    and None keeps them all.
+    """
+    hunks: list[DiffHunk] = []
+    hunk: Optional[DiffHunk] = None
+    old = new = 1
+
+    change_after = [False] * len(content)
+    seen = False
+    for i in range(len(content) - 1, -1, -1):
+        change_after[i] = seen
+        if _is_change(content[i]):
+            seen = True
+
+    def open_hunk() -> DiffHunk:
+        nonlocal hunk
+        if hunk is None:
+            hunk = DiffHunk(old_start=old, old_count=0,
+                            new_start=new, new_count=0)
+        return hunk
+
+    def close_hunk() -> None:
+        nonlocal hunk
+        if hunk is not None and hunk.lines:
+            hunks.append(hunk)
+        hunk = None
+
+    def add_context(lines: list[str]) -> None:
+        nonlocal old, new
+        if not lines:
+            return
+        h = open_hunk()
+        for text in lines:
+            h.lines.append(DiffLine(old, new, text, "context"))
+            h.old_count += 1
+            h.new_count += 1
+            old += 1
+            new += 1
+
+    for i, section in enumerate(content):
+        if "ab" in section:
+            lines = section["ab"]
+            if context_lines is None:
+                add_context(lines)
+                continue
+            lead = context_lines if hunk is not None else 0
+            trail = context_lines if change_after[i] else 0
+            if lead + trail >= len(lines):
+                if hunk is not None or change_after[i]:
+                    add_context(lines)
+                else:
+                    old += len(lines)
+                    new += len(lines)
+                continue
+            add_context(lines[:lead])
+            close_hunk()
+            skipped = len(lines) - lead - trail
+            old += skipped
+            new += skipped
+            add_context(lines[len(lines) - trail:] if trail else [])
+        elif _is_change(section):
+            h = open_hunk()
+            for text in section.get("a", []):
+                h.lines.append(DiffLine(old, None, text, "deleted"))
+                h.old_count += 1
+                old += 1
+            for text in section.get("b", []):
+                h.lines.append(DiffLine(None, new, text, "added"))
+                h.new_count += 1
+                new += 1
+        if section.get("skip"):
+            close_hunk()
+            old += section["skip"]
+            new += section["skip"]
+
+    close_hunk()
+    return hunks
+
+
 @dataclass
 class FileChange:
     """Represents a changed file in a Gerrit change."""
@@ -111,7 +202,8 @@ class FileChange:
             "lines_deleted": self.lines_deleted,
             "size_delta": self.size_delta,
             "diff": self.format_diff(),
-            "new_content": self.new_content,
+            **({"new_content": self.new_content}
+               if self.new_content is not None else {}),
         }
 
 
@@ -259,6 +351,7 @@ class CodeReviewer:
         url: str,
         include_file_content: bool = False,
         context_lines: Optional[int] = 3,
+        base: Optional[int] = None,
     ) -> ReviewData:
         """Get all data needed to review a change.
 
@@ -268,6 +361,7 @@ class CodeReviewer:
             context_lines: Lines of context around each diff hunk. Pass None
                 to fetch the full file as context (Gerrit default, but very
                 verbose for large files). Default is 3.
+            base: Patchset to diff against; None for the parent commit.
 
         Returns:
             ReviewData with change info and all file diffs
@@ -281,6 +375,7 @@ class CodeReviewer:
             change_number=change_number,
             include_file_content=include_file_content,
             context_lines=context_lines,
+            base=base,
         )
 
     def get_review_data_for_change(
@@ -289,6 +384,7 @@ class CodeReviewer:
         revision: str = "current",
         include_file_content: bool = False,
         context_lines: Optional[int] = 3,
+        base: Optional[int] = None,
     ) -> ReviewData:
         """Get all data needed to review a change by number.
 
@@ -297,6 +393,7 @@ class CodeReviewer:
             revision: Revision to review ("current" or specific SHA)
             include_file_content: Whether to fetch full file content
             context_lines: Lines of context per hunk. None = full file context.
+            base: Patchset to diff against; None for the parent commit.
 
         Returns:
             ReviewData with change info and all file diffs
@@ -335,7 +432,8 @@ class CodeReviewer:
 
         # Get list of files
         files = self._get_files_for_revision(
-            change_number, revision, include_file_content, context_lines
+            change_number, revision, include_file_content, context_lines,
+            base=base,
         )
 
         return ReviewData(
@@ -351,11 +449,12 @@ class CodeReviewer:
         revision: str,
         include_file_content: bool,
         context_lines: Optional[int] = 3,
+        base: Optional[int] = None,
     ) -> list[FileChange]:
         """Get all changed files for a revision."""
-        # Get file list
+        query = f"?base={base}" if base is not None else ""
         files_response = self.client.rest.get(
-            f"/changes/{change_number}/revisions/{revision}/files"
+            f"/changes/{change_number}/revisions/{revision}/files{query}"
         )
 
         files = []
@@ -373,7 +472,8 @@ class CodeReviewer:
             )
 
             # Get diff for this file
-            self._add_diff_to_file(change_number, revision, file_change, context_lines)
+            self._add_diff_to_file(change_number, revision, file_change,
+                                   context_lines, base=base)
 
             # Optionally get full file content
             if include_file_content:
@@ -391,108 +491,32 @@ class CodeReviewer:
         revision: str,
         file_change: FileChange,
         context_lines: Optional[int] = 3,
+        base: Optional[int] = None,
     ) -> None:
         """Add diff hunks to a FileChange.
 
         Args:
             context_lines: Lines of context around each changed hunk.
-                None means the Gerrit default (full file as context, very large).
+                None keeps the whole file as context (very large).
                 0 means changed lines only, no surrounding context.
                 3 (default) gives a compact, readable diff.
+            base: Patchset to diff against; None for the parent commit.
         """
         encoded_path = quote(file_change.path, safe="")
+        query = f"?base={base}" if base is not None else ""
         try:
-            if context_lines is None:
-                diff_url = f"/changes/{change_number}/revisions/{revision}/files/{encoded_path}/diff"
-            else:
-                diff_url = f"/changes/{change_number}/revisions/{revision}/files/{encoded_path}/diff?context={context_lines}"
-            diff = self.client.rest.get(diff_url)
+            diff = self.client.rest.get(
+                f"/changes/{change_number}/revisions/{revision}"
+                f"/files/{encoded_path}/diff{query}")
         except Exception as e:
-            print(f"Error getting diff for {file_change.path}: {e}")
+            print(f"Error getting diff for {file_change.path}: {e}",
+                  file=sys.stderr)
             return
 
         if "content" not in diff:
             return
 
-        # Parse diff content into hunks
-        content_sections = diff.get("content", [])
-        diff.get("meta_a", {})
-        diff.get("meta_b", {})
-
-        # Track line numbers
-        old_line = 1
-        new_line = 1
-
-        current_hunk = None
-        hunks = []
-
-        for section in content_sections:
-            if "ab" in section:
-                # Context lines (unchanged)
-                for line_content in section["ab"]:
-                    if current_hunk is None:
-                        current_hunk = DiffHunk(
-                            old_start=old_line,
-                            old_count=0,
-                            new_start=new_line,
-                            new_count=0,
-                        )
-                    current_hunk.lines.append(DiffLine(
-                        line_number_old=old_line,
-                        line_number_new=new_line,
-                        content=line_content,
-                        type="context",
-                    ))
-                    current_hunk.old_count += 1
-                    current_hunk.new_count += 1
-                    old_line += 1
-                    new_line += 1
-
-            elif "a" in section or "b" in section:
-                # Changed lines
-                if current_hunk is None:
-                    current_hunk = DiffHunk(
-                        old_start=old_line,
-                        old_count=0,
-                        new_start=new_line,
-                        new_count=0,
-                    )
-
-                # Deleted lines
-                for line_content in section.get("a", []):
-                    current_hunk.lines.append(DiffLine(
-                        line_number_old=old_line,
-                        line_number_new=None,
-                        content=line_content,
-                        type="deleted",
-                    ))
-                    current_hunk.old_count += 1
-                    old_line += 1
-
-                # Added lines
-                for line_content in section.get("b", []):
-                    current_hunk.lines.append(DiffLine(
-                        line_number_old=None,
-                        line_number_new=new_line,
-                        content=line_content,
-                        type="added",
-                    ))
-                    current_hunk.new_count += 1
-                    new_line += 1
-
-            # Check if we should finalize this hunk (skip marker)
-            if section.get("skip"):
-                if current_hunk and current_hunk.lines:
-                    hunks.append(current_hunk)
-                current_hunk = None
-                skip_count = section.get("skip", 0)
-                old_line += skip_count
-                new_line += skip_count
-
-        # Add final hunk
-        if current_hunk and current_hunk.lines:
-            hunks.append(current_hunk)
-
+        hunks = content_to_hunks(diff["content"], context_lines)
         file_change.hunks = hunks
 
     def _add_content_to_file(
@@ -519,7 +543,8 @@ class CodeReviewer:
                 except Exception:
                     file_change.new_content = content
         except Exception as e:
-            print(f"Error getting content for {file_change.path}: {e}")
+            print(f"Error getting content for {file_change.path}: {e}",
+                  file=sys.stderr)
 
     def post_review(
         self,
