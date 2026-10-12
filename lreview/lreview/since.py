@@ -130,6 +130,7 @@ def focus_prompt(focus: SinceFocus, sha: str) -> str:
         "them only if it is a real bug -- incorrect behaviour, a crash or "
         "hang, data loss or corruption, a security hole -- never style, "
         "naming, wording, comments or optional cleanups. If what changed "
-        "is clean, the review is clean, whatever else the commit contains.",
+        "is clean, the review is clean, whatever else the commit contains. "
+        "A clean review still writes ./review-metadata.json.",
     ]
     return "\n".join(lines)

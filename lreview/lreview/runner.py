@@ -201,6 +201,43 @@ def parse_final_usage(log_path: Path):
     return None, None
 
 
+# A provider's safety classifier ending the turn, as codex and claude
+# report it.
+_PROVIDER_REFUSAL_RE = re.compile(
+    r"flagged for possible|cybersecurity risk|usage polic|"
+    r"unable to respond to this request", re.IGNORECASE)
+
+
+def agent_error(log_path: Path) -> Optional[str]:
+    """The error the agent's event stream ended on, or None.
+
+    codex reports a failed turn as turn.failed (after an error event
+    with the same message); claude as a result event with is_error.
+    """
+    message = None
+    for line in _read_tail(log_path, 65536).splitlines():
+        if '"type"' not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        kind = obj.get("type")
+        if kind == "turn.failed":
+            message = (obj.get("error") or {}).get("message") or message
+        elif kind == "error" and obj.get("message"):
+            message = obj["message"]
+        elif kind == "result" and obj.get("is_error"):
+            message = str(obj.get("result") or obj.get("subtype") or "")
+    if message:
+        message = " ".join(message.split())
+        if len(message) > 300:
+            message = message[:297] + "..."
+    return message or None
+
+
 # What claude prints when --resume names a session it does not have.
 _NO_SESSION_TEXT = "No conversation found with session ID"
 
@@ -673,6 +710,50 @@ class ProgressTracker:
         console.clear_status()
 
 
+# Sent once, in the same session, to a claude review that ended with
+# neither file: some clean reviews (mostly --since ones) say the
+# protocol asks for review-metadata.json and then do not write it.
+METADATA_NUDGE = (
+    "You ended the review without writing ./review-metadata.json.  "
+    "lreview reads the review only from the files, and counts a review "
+    "without that file as failed, clean or not.  Write it now as the "
+    "protocol specifies, and ./gerrit-review.json as well if you found "
+    "regressions.  Do not review the commit again.")
+_METADATA_NUDGE_TIMEOUT = 600
+
+
+def _ask_for_metadata(config: BatchConfig, change, log_path: Path,
+                      worktree_dir: Path, extra_env: dict):
+    """Resume a claude review that ended without review-metadata.json
+    and ask for the file once.
+
+    Returns that turn's (tokens, cost_usd), or None when it could not
+    be asked.  The turn has its own log beside the review's, named so
+    that nothing taking kreview-*.log for a review picks it up.
+    """
+    if config.agent != "claude":
+        return None
+    session_id = parse_session_id(log_path)
+    if not session_id:
+        return None
+    nudge_log = log_path.with_suffix(".metadata-nudge.jsonl")
+    cmd = get_agent("claude").build_cmd(
+        config.model, config.effort, config.agent_args, METADATA_NUDGE,
+        resume=session_id, lean=config.lean,
+        system_file=(str(preload_file(config))
+                     if _preloading(config, change) else None))
+    _log(f"[{change.slug}] note: the review ended without "
+         f"{METADATA_JSON_NAME}; asking for it once")
+    try:
+        _run_agent(cmd, worktree_dir, nudge_log,
+                   min(config.timeout, _METADATA_NUDGE_TIMEOUT), extra_env)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _log(f"[{change.slug}] warning: asking for {METADATA_JSON_NAME} "
+             f"failed: {exc}")
+        return None
+    return parse_final_usage(nudge_log)
+
+
 def _run_agent(cmd: list[str], cwd: Path, log_path: Path,
                timeout: int, extra_env: Optional[dict] = None,
                stdin_path: Optional[Path] = None) -> int:
@@ -833,6 +914,19 @@ def run_review(
         tokens = live_token_count(log_path)
     review_json = worktree_dir / (REVIEW_RESULT_NAME if getattr(change, "provider", None) == "github" else REVIEW_JSON_NAME)
     metadata_json = worktree_dir / METADATA_JSON_NAME
+    asked_for_metadata = False
+    if (returncode == 0 and not review_json.is_file()
+            and not metadata_json.is_file()
+            and getattr(change, "provider", None) != "github"):
+        usage = _ask_for_metadata(config, change, log_path, worktree_dir,
+                                  extra_env)
+        if usage is not None:
+            asked_for_metadata = True
+            more_tokens, more_cost = usage
+            if more_tokens:
+                tokens = (tokens or 0) + more_tokens
+            if more_cost is not None:
+                cost_usd = (cost_usd or 0) + more_cost
 
     memory_doc = None
     if (config.memory_db is not None
@@ -861,13 +955,20 @@ def run_review(
 
     if not review_json.is_file():
         if returncode != 0:
+            error = f"{config.agent} exited {returncode}"
+            reason = agent_error(log_path)
+            if reason:
+                error += f": {reason}"
+                if _PROVIDER_REFUSAL_RE.search(reason):
+                    error += (" (the model provider refused the review; "
+                              "lreview cannot change that, but a rerun "
+                              "or another --agent may get through)")
             _log(f"[{change.slug}] {console.color('red', 'FAILED')} "
-                 f"(exit {returncode}), see {log_path}")
+                 f"({error}), see {log_path}")
             return ReviewResult(
                 change, STATUS_FAILED, mode=config.mode, duration=duration,
                 log_path=log_path, model=model, tokens=tokens,
-                cost_usd=cost_usd,
-                error=f"{config.agent} exited {returncode}")
+                cost_usd=cost_usd, error=error)
         if getattr(change, "provider", None) == "github":
             # A PR review writes review-result.json even when clean;
             # review-metadata.json alone is the Gerrit contract, which
@@ -890,7 +991,9 @@ def run_review(
                 log_path=log_path, model=model, tokens=tokens,
                 cost_usd=cost_usd,
                 error=f"no {METADATA_JSON_NAME} produced — review did not "
-                      "run to completion")
+                      "run to completion"
+                      + (", nor when asked again" if asked_for_metadata
+                         else ""))
         # A completed clean review supersedes earlier findings
         # artifacts for the same change+patchset: drop the stale
         # findings JSON so the results directory never shows findings

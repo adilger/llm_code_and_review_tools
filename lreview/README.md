@@ -364,6 +364,11 @@ lreview bench report --judge DIR...                  # LLM-judged matching
    and `./review-metadata.json` (severity score) for **every completed
    analysis** — the metadata file is the completion marker, so a run
    that produced neither is recorded as `failed`, not silently clean.
+   A claude review that exits cleanly with neither file is resumed
+   once and asked for the metadata (its own
+   `kreview-*.metadata-nudge.jsonl` log); only if that fails too is it
+   `failed`. A failed run's error carries the agent's own last error,
+   such as a provider classifier refusing the turn.
    Both artifacts are collected; the worktree is then removed
    (`--keep-worktrees` to keep them). One crashed or malformed review
    never aborts the rest of the batch.

@@ -51,8 +51,15 @@ case " $* " in *" --resume "*)
 esac
 echo '{"type":"system","subtype":"init","session_id":"'"${STUB_SESSION:-sess-1}"'"}'
 if [ -f FAIL_MARKER ]; then echo "boom"; exit 3; fi
+if [ -f REFUSED_MARKER ]; then
+    echo '{"type":"result","is_error":true,"result":"API Error: Claude Code is unable to respond to this request"}'
+    exit 1
+fi
 if [ -f SLEEP_MARKER ]; then sleep 30; exit 0; fi
 if [ -f NO_METADATA_MARKER ]; then echo "bailed early"; exit 0; fi
+if [ -f LATE_METADATA_MARKER ]; then
+    case " $* " in *" --resume "*) ;; *) echo "forgot it"; exit 0;; esac
+fi
 SEV=none
 if [ -f HAS_FINDINGS ]; then SEV=high; fi
 printf '{"author":"a","sha":"s","subject":"t","issues-found":0,\
@@ -632,6 +639,48 @@ class TestRunBatch:
         results = run_batch(config, [_change(111, sha)])
         assert results[0].status == STATUS_FAILED
         assert "did not run to completion" in results[0].error
+
+    def test_missing_metadata_is_asked_for_once(self, repo, tmp_path,
+                                                stub_claude, monkeypatch):
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        sha = _commit_with_marker(repo, "LATE_METADATA_MARKER")
+        config = _config(repo, tmp_path)
+        result = run_batch(config, [_change(112, sha)])[0]
+        assert result.status == STATUS_CLEAN
+        assert result.cost_usd == 1.23
+        first, nudge = _invocations(args_log)
+        assert "--resume" not in first
+        assert nudge[nudge.index("--resume") + 1] == "sess-1"
+        assert "review-metadata.json" in nudge[nudge.index("-p") + 1]
+        assert list(config.results_dir.glob("*.metadata-nudge.jsonl"))
+
+    def test_asked_once_and_still_missing_fails(self, repo, tmp_path,
+                                                stub_claude, monkeypatch):
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        sha = _commit_with_marker(repo, "NO_METADATA_MARKER")
+        result = run_batch(_config(repo, tmp_path), [_change(113, sha)])[0]
+        assert result.status == STATUS_FAILED
+        assert "nor when asked again" in result.error
+        assert len(_invocations(args_log)) == 2
+
+    def test_a_failed_review_is_not_asked(self, repo, tmp_path,
+                                          stub_claude, monkeypatch):
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        sha = _commit_with_marker(repo, "FAIL_MARKER")
+        run_batch(_config(repo, tmp_path), [_change(114, sha)])
+        assert len(_invocations(args_log)) == 1
+
+    def test_provider_refusal_is_reported(self, repo, tmp_path,
+                                          stub_claude):
+        sha = _commit_with_marker(repo, "REFUSED_MARKER")
+        result = run_batch(_config(repo, tmp_path), [_change(115, sha)])[0]
+        assert result.status == STATUS_FAILED
+        assert result.error.startswith(
+            "claude exited 1: API Error: Claude Code is unable")
+        assert "provider refused" in result.error
 
     def test_github_findings_reach_the_reports(self, repo, tmp_path,
                                                stub_claude):
@@ -1301,3 +1350,27 @@ def test_codex_preload_goes_on_stdin(repo, tmp_path, monkeypatch):
     assert seen.startswith("# Lustre review protocol")
     assert seen.index("contents of review-core.md") < seen.index("+hello")
     assert result.log_path.with_suffix(".prompt.md").is_file()
+
+
+CODEX_REFUSAL = "This content was flagged for possible cybersecurity risk."
+
+
+def test_agent_error_codex_turn_failed(tmp_path):
+    from lreview.runner import agent_error
+    log = tmp_path / "kreview.log"
+    log.write_text("\n".join([
+        '{"type":"thread.started","thread_id":"t"}',
+        '{"type":"item.completed","item":{"type":"agent_message"}}',
+        json.dumps({"type": "error", "message": CODEX_REFUSAL}),
+        json.dumps({"type": "turn.failed",
+                    "error": {"message": CODEX_REFUSAL}}),
+    ]) + "\n")
+    assert agent_error(log) == CODEX_REFUSAL
+
+
+def test_agent_error_none_for_a_plain_failure(tmp_path):
+    from lreview.runner import agent_error
+    log = tmp_path / "kreview.log"
+    log.write_text('{"type":"result","is_error":false,"result":"ok"}\nboom\n')
+    assert agent_error(log) is None
+    assert agent_error(tmp_path / "missing.log") is None
