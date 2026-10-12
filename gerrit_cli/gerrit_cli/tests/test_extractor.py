@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from gerrit_cli.extractor import CommentExtractor, extract_comments
 from gerrit_cli.models import Author, Comment
 
@@ -470,6 +472,53 @@ class TestMessageFiltering:
         # Message with real content should be kept
         assert len(result.review_messages) == 1
         assert "Looks good overall" in result.review_messages[0].message
+
+    @pytest.mark.parametrize("include_system, kept", [(False, []), (True, ["msg1", "msg2"])])
+    @patch("gerrit_cli.extractor.GerritCommentsClient")
+    def test_include_system_keeps_count_only_votes(self, mock_client_class,
+                                                   include_system, kept):
+        """A vote whose message only counts inline comments shows with
+        --include-system."""
+        mock_client = MagicMock()
+        mock_client.url = "https://review.example.com"
+        mock_client.format_change_url.return_value = "https://example.com/123"
+        mock_client.get_change_detail.return_value = {
+            "id": "test~123",
+            "project": "test",
+            "branch": "master",
+            "subject": "Test",
+            "status": "NEW",
+            "current_revision": "abc",
+            "owner": {"name": "Owner"},
+            "revisions": {"abc": {"_number": 3}},
+        }
+        mock_client.get_comments.return_value = {}
+        mock_client.get_messages.return_value = [
+            {
+                "id": "msg1",
+                "author": {"name": "Reviewer"},
+                "message": "Patch Set 3: Code-Review-1\n\n(2 comments)",
+                "_revision_number": 3,
+                "date": "2025-01-01",
+            },
+            {
+                "id": "msg2",
+                "author": {"name": "Reviewer"},
+                "message": "Patch Set 3:\n\n(1 comment)",
+                "_revision_number": 3,
+                "date": "2025-01-02",
+            },
+        ]
+        mock_client_class.return_value = mock_client
+
+        result = CommentExtractor().extract_from_change(
+            123, include_code_context=False, include_system=include_system)
+
+        assert [m.id for m in result.review_messages] == kept
+        if include_system:
+            assert result.review_messages[0].message.startswith(
+                "Patch Set 3: Code-Review-1")
+            assert result.review_messages[0].patch_set == 3
 
 
 class TestThreadOrganization:

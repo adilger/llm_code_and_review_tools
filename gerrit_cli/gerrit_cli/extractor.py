@@ -271,15 +271,12 @@ class CommentExtractor:
                 if msg_text.startswith("Topic set to") or msg_text.startswith("Topic ") and " removed" in msg_text:
                     continue
 
-            # Skip messages that are just "(N comments)" with no substantive text
-            # The actual comments are shown separately
-            stripped = msg_text.strip()
-            # Match patterns like:
-            #   "Patch Set N:\n\n(N comment(s))"
-            #   "Patch Set N: Code-Review+1\n\n(N comment(s))"
-            # Where the only content after the header is "(N comment(s))"
-            if re.match(r'^Patch Set \d+:[^\n]*\n\s*\(\d+ comments?\)\s*$', stripped):
-                continue
+                # Skip messages that are just "(N comments)" with no
+                # substantive text; the comments are listed in the threads.
+                # The header may still carry a vote.
+                if re.match(r'^Patch Set \d+:[^\n]*\n\s*\(\d+ comments?\)\s*$',
+                            msg_text.strip()):
+                    continue
 
             # Filter by author
             author_name = raw_msg.get("author", {}).get("name", "")

@@ -370,6 +370,7 @@ includes:
 ### Comments & Review
 ```bash
 comments <URL>                   # Get unresolved comments
+comments <URL> --all --include-system  # Every review message too: votes, uploads, CI
 reply <thread_index> "msg"       # Reply to a comment
 reply <thread_index> --done      # Mark as done
 done <URL> <idx>                 # Mark as done (shortcut for 'reply --done')

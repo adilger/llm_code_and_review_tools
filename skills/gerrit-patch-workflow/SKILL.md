@@ -37,6 +37,9 @@ gc comments 64086 --fields=index,file,message
 gc comments 64086 --all --timeline --since '2026-10-01 17:00'
                                   # who said what when, oldest first, replies too:
                                   # "was my comment answered?"
+gc comments 64086 --all --include-system
+                                  # every change-level message, each vote with its
+                                  # reviewer and patchset, uploads and CI too
 ```
 
 Read **all** the feedback, human and bot. Bots -- `aireview` in particular

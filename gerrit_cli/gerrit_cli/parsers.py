@@ -75,7 +75,8 @@ def add_extract_parser(subparsers):
         "--include-system",
         action="store_true",
         help="Include system and CI bot messages (patchset uploads, rebases, "
-             "Maloo results, Jenkins builds, Autotest retests)",
+             "Maloo results, Jenkins builds, Autotest retests) and review "
+             "messages that carry only a vote and a comment count",
     )
     parser.add_argument(
         "--include-ci",
@@ -320,7 +321,8 @@ def add_series_comments_parser(subparsers):
         "--include-system",
         action="store_true",
         help="Include system and CI bot messages (patchset uploads, rebases, "
-             "Maloo results, Jenkins builds, Autotest retests)",
+             "Maloo results, Jenkins builds, Autotest retests) and review "
+             "messages that carry only a vote and a comment count",
     )
     parser.add_argument(
         "--include-ci",
