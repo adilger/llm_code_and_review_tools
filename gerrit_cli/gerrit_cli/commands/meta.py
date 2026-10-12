@@ -379,7 +379,34 @@ every comment, and --dry-run to preview the payload without posting.
                 "description": "Preview prefixed comments without posting",
             },
         ],
-        "related": ["comments", "review-series"],
+        "related": ["comments", "review-series", "diff"],
+    },
+    "diff": {
+        "summary": "Show what changed between two patchsets",
+        "description": """
+Compare two patchsets of one change, for re-review after an update.
+With no patchsets it compares the newest patchset with the one before
+it; with one, that patchset with the newest. A change with only one
+patchset is shown against its parent commit, the same diff 'gc review'
+gives. Diffs carry 3 lines of context around each change (--unified N).
+
+To read a change itself, use 'gc review'.
+""",
+        "examples": [
+            {
+                "command": "gc diff URL",
+                "description": "Newest patchset against the one before it",
+            },
+            {
+                "command": "gc diff URL 3",
+                "description": "Patchset 3 against the newest",
+            },
+            {
+                "command": "gc diff URL 3 5",
+                "description": "Patchset 3 against patchset 5",
+            },
+        ],
+        "related": ["review", "info"],
     },
     "series-comments": {
         "summary": "Get comments from all patches in a series",

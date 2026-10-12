@@ -404,7 +404,8 @@ series-info <URL>                # Info for all patches (patchsets, reviews, CI)
 related <URL>                    # Relation chain (series) for a change
 graph <URL>                      # Interactive DAG visualizer (see above)
 info <URL>                       # Show change info (reviewers, labels, etc.)
-diff <URL>                       # Show what changed between two patchsets
+diff <URL> [A [B]]               # What changed between two patchsets
+                                 # (default: newest against the one before)
 search <query>                   # Search changes (alias: s); --all follows
                                  # the pages, 'explain search' has operators
 maloo <URL> [URL...]             # Triage Maloo CI results (batch mode)

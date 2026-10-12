@@ -1,6 +1,10 @@
 """Compact diffs: Gerrit ignores ?context=, so review and diff cut it."""
 
+import argparse
+import json
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from gerrit_cli.reviewer import CodeReviewer, FileChange, content_to_hunks
 
@@ -130,3 +134,80 @@ class TestReviewCompactByDefault:
         fc = FileChange(path="a", status="M", old_path=None, lines_added=0,
                         lines_deleted=0, size_delta=0, new_content="x")
         assert fc.to_dict()["new_content"] == "x"
+
+
+def _parse_diff(*argv):
+    from gerrit_cli import cli
+    from gerrit_cli.parsers import setup_parsers
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(
+        dest="command", parser_class=cli._JsonErrorParser)
+    setup_parsers(subparsers, cli.build_handlers())
+    return parser.parse_args(["diff", *argv])
+
+
+def _run_diff(capsys, client, *argv):
+    from gerrit_cli.commands.ci import cmd_diff
+
+    args = _parse_diff(*argv)
+    with patch("gerrit_cli.cli.GerritCommentsClient") as MockClient:
+        MockClient.return_value = client
+        MockClient.parse_gerrit_url.return_value = ("https://x", 123)
+        with pytest.raises(SystemExit) as exc:
+            cmd_diff(args)
+    return exc.value.code, json.loads(capsys.readouterr().out)
+
+
+def _client(patchsets):
+    client = MagicMock()
+    client.get_change_detail.return_value = {
+        "revisions": {f"r{n}": {"_number": n} for n in patchsets}}
+    client.get_files_between_patchsets.return_value = {
+        "/COMMIT_MSG": {}, "big.sh": {"status": "M"}}
+    client.get_diff.return_value = {"content": WHOLE_FILE}
+    return client
+
+
+class TestDiffDefaults:
+
+    def test_patchsets_are_optional(self):
+        args = _parse_diff("123")
+        assert (args.patchset_a, args.patchset_b, args.unified) == (
+            None, None, 3)
+
+    def test_newest_against_previous(self, capsys):
+        client = _client([1, 2, 3])
+        code, out = _run_diff(capsys, client, "123")
+        assert code == 0
+        assert (out["patchset_a"], out["patchset_b"]) == (2, 3)
+        client.get_files_between_patchsets.assert_called_once_with(123, 2, 3)
+        assert out["files"][0]["diff"].count("@@ -") == 2
+        assert "note" not in out
+
+    def test_one_patchset_is_against_parent(self, capsys):
+        client = _client([1])
+        code, out = _run_diff(capsys, client, "123")
+        assert code == 0
+        assert out["patchset_a"] is None
+        assert "parent" in out["note"]
+        client.get_files_between_patchsets.assert_called_once_with(
+            123, None, 1)
+        assert client.get_diff.call_args.args[2] is None
+
+    def test_base_given(self, capsys):
+        client = _client([1, 2, 3, 4])
+        code, out = _run_diff(capsys, client, "123", "2")
+        assert (out["patchset_a"], out["patchset_b"]) == (2, 4)
+
+    def test_base_not_below_target(self, capsys):
+        code, out = _run_diff(capsys, _client([1, 2]), "123", "2", "1")
+        assert code != 0
+        assert out["code"] == "INVALID_INPUT"
+
+
+class TestDiffExplained:
+
+    def test_explain_diff(self, capsys):
+        from gerrit_cli.commands.meta import COMMAND_EXPLANATIONS
+        assert "diff" in COMMAND_EXPLANATIONS

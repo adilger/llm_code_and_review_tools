@@ -109,6 +109,20 @@ def get_tool_description() -> ToolDescription:
                 output_fields=["change_number", "files[].path", "files[].diff", "files[].insertions", "files[].deletions"],
                 next_actions=["comments", "review-series"],
             ),
+            Command(
+                name="diff",
+                description="Show what changed between two patchsets (default: newest against the one before)",
+                usage="gc diff <URL> [PATCHSET_A [PATCHSET_B]]",
+                arguments=[
+                    Argument(name="url", description="Gerrit change URL, number or Change-Id", required=True),
+                    Argument(name="patchset_a", description="Base patchset (default: the one before patchset_b)", type="integer"),
+                    Argument(name="patchset_b", description="Target patchset (default: newest)", type="integer"),
+                    Argument(name="--unified", description="Lines of diff context", type="integer", default=3),
+                ],
+                examples=["gc diff 12345", "gc diff 12345 3", "gc diff 12345 3 5"],
+                output_fields=["change_number", "patchset_a", "patchset_b", "files[].path", "files[].diff", "note"],
+                next_actions=["review", "comments"],
+            ),
             # --- Series commands ---
             Command(
                 name="review-series",

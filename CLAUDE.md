@@ -106,7 +106,9 @@ if several are open the error lists them.
 - **Patch workflow:** `gc work-on-patch <url>`, `gc finish-patch`,
   `gc next-patch`, `gc abort`, `gc status`
 - **Info:** `gc info <url>`, `gc series-info <url>`,
-  `gc series-status <url>`, `gc related <url>`, `gc diff <url>`
+  `gc series-status <url>`, `gc related <url>`,
+  `gc diff <url> [A [B]]` (between patchsets; default the newest
+  against the one before)
 - **CI:** `gc maloo <url>`, `gc watch <file>`
 - **Search:** `gc search <query>`, `gc s <query>` (`--all` follows the
   pages; `gc explain search` lists the operators that find related changes)

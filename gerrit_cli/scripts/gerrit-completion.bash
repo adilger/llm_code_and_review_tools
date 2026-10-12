@@ -50,7 +50,7 @@ _gerrit_completions() {
         comments|extract) opts="--all --context-lines --fields --help --include-ci --include-system --no-context --pretty --since --summary --timeline -a -c -h -p -s" ;;
         continue-reintegration) opts="--help -h" ;;
         describe) opts="--command --help --pretty -h -p" ;;
-        diff) opts="--help --pretty -h -p" ;;
+        diff) opts="--help --pretty --unified -h -p -u" ;;
         done) opts="--help --pretty -h -p" ;;
         examples) opts="--help -h" ;;
         explain) opts="--help -h" ;;

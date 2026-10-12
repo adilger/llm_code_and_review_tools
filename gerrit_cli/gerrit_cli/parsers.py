@@ -1332,15 +1332,29 @@ def add_diff_parser(subparsers):
     parser = subparsers.add_parser(
         "diff",
         help="Show what changed between two patchsets",
-        description="Compare two patchsets of a change to see what was modified. "
-                    "Useful for re-review after updates. "
-                    "Example: gc diff <url> 3 5",
+        description="Compare two patchsets of a change to see what was "
+                    "modified, for re-review after an update. With no "
+                    "patchsets, the newest patchset against the one before "
+                    "it (a change with one patchset is shown against its "
+                    "parent). To read the change itself, use 'gc review'. "
+                    "Examples: gc diff <url>; gc diff <url> 3; "
+                    "gc diff <url> 3 5",
     )
     parser.add_argument("url", help="Gerrit change URL, number or Change-Id")
-    parser.add_argument("patchset_a", type=int, help="Base patchset number")
+    parser.add_argument(
+        "patchset_a", type=int, nargs="?",
+        help="Base patchset number (default: the one before patchset_b)",
+    )
     parser.add_argument(
         "patchset_b", type=int, nargs="?",
         help="Target patchset number (default: latest)",
+    )
+    parser.add_argument(
+        "--unified", "-u",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Lines of context around each changed hunk (default: 3)",
     )
     parser.add_argument(
         "--pretty", "-p",

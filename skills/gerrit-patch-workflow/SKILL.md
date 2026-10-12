@@ -124,7 +124,9 @@ gc info <url>             # patchsets, reviews, CI at a glance
 gc series-info <url>
 gc series-status <url>    # whole series, one table
 gc related <url>
-gc diff <url>
+gc review <url>           # the change itself, 3 lines of context (-u N)
+gc diff <url> [A [B]]     # what changed between patchsets; default the
+                          # newest against the one before it
 gc maloo <url>            # enforced/optional test summary
 gc watch patches.json     # Maloo triage across a watched list
 ```

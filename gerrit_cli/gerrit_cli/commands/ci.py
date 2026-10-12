@@ -521,10 +521,16 @@ def cmd_watch(args):
 
 
 def cmd_diff(args):
-    """Show what changed between two patchsets."""
+    """Show what changed between two patchsets.
+
+    With no patchsets given, the newest patchset against the one before
+    it; a change with one patchset is shown against its parent commit.
+    """
+    from ..reviewer import content_to_hunks
     cli = _cli()
     command = "diff"
     pretty = getattr(args, 'pretty', False)
+    context_lines = getattr(args, 'unified', 3)
 
     try:
         base_url, change_number = cli.GerritCommentsClient.parse_gerrit_url(args.url)
@@ -533,7 +539,6 @@ def cmd_diff(args):
         patchset_a = args.patchset_a
         patchset_b = args.patchset_b
 
-        # If patchset_b not specified, use latest
         if patchset_b is None:
             change = client.get_change_detail(change_number)
             revisions = change.get("revisions", {})
@@ -542,7 +547,15 @@ def cmd_diff(args):
                 default=1,
             )
 
-        if patchset_a >= patchset_b:
+        note = None
+        if patchset_a is None:
+            patchset_a = patchset_b - 1
+            if patchset_a < 1:
+                patchset_a = None
+                note = (f"patchset {patchset_b} has no patchset before it, "
+                        "so this is the change against its parent commit, "
+                        "as gc review shows it")
+        elif patchset_a >= patchset_b:
             sys.exit(output_error(
                 ErrorCode.INVALID_INPUT,
                 f"Base patchset ({patchset_a}) must be less than "
@@ -573,37 +586,15 @@ def cmd_diff(args):
             try:
                 diff_data = client.get_diff(
                     change_number, f["path"],
-                    str(patchset_a), str(patchset_b),
+                    str(patchset_a) if patchset_a is not None else None,
+                    str(patchset_b),
                 )
-                # Format diff content from the API response
-                lines = []
-                for section in diff_data.get("content", []):
-                    if "ab" in section:
-                        # Common lines (context)
-                        for line in section["ab"]:
-                            lines.append(f" {line}")
-                    if "a" in section:
-                        for line in section["a"]:
-                            lines.append(f"-{line}")
-                    if "b" in section:
-                        for line in section["b"]:
-                            lines.append(f"+{line}")
-
-                diffs.append({
-                    "path": f["path"],
-                    "status": f["status"],
-                    "lines_inserted": f["lines_inserted"],
-                    "lines_deleted": f["lines_deleted"],
-                    "diff": "\n".join(lines),
-                })
+                hunks = content_to_hunks(
+                    diff_data.get("content", []), context_lines)
+                diff_text = "\n".join(h.format() for h in hunks)
             except Exception:
-                diffs.append({
-                    "path": f["path"],
-                    "status": f["status"],
-                    "lines_inserted": f["lines_inserted"],
-                    "lines_deleted": f["lines_deleted"],
-                    "diff": "(diff unavailable)",
-                })
+                diff_text = "(diff unavailable)"
+            diffs.append({**f, "diff": diff_text})
 
         data = {
             "change_number": change_number,
@@ -612,6 +603,8 @@ def cmd_diff(args):
             "files_changed": len(file_list),
             "files": diffs,
         }
+        if note:
+            data["note"] = note
 
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)

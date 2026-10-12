@@ -972,7 +972,7 @@ class GerritCommentsClient:
         self,
         change_number: int,
         file_path: str,
-        revision_a: str,
+        revision_a: Optional[str],
         revision_b: str = "current",
     ) -> dict[str, Any]:
         """Get the diff for a file between two revisions.
@@ -980,37 +980,40 @@ class GerritCommentsClient:
         Args:
             change_number: The change number
             file_path: Path to the file
-            revision_a: Base revision (patchset number or SHA)
+            revision_a: Base revision (patchset number or SHA), or None
+                for revision_b's parent commit
             revision_b: Target revision (default "current")
 
         Returns:
             Diff info from the API
         """
         encoded_path = quote(file_path, safe="")
+        base = f"?base={revision_a}" if revision_a is not None else ""
         return self.rest.get(
             f"/changes/{change_number}/revisions/{revision_b}"
-            f"/files/{encoded_path}/diff?base={revision_a}"
+            f"/files/{encoded_path}/diff{base}"
         )
 
     def get_files_between_patchsets(
         self,
         change_number: int,
-        patchset_a: int,
+        patchset_a: Optional[int],
         patchset_b: int,
     ) -> dict[str, dict[str, Any]]:
         """Get list of files changed between two patchsets.
 
         Args:
             change_number: The change number
-            patchset_a: Base patchset number
+            patchset_a: Base patchset number, or None for patchset_b's
+                parent commit
             patchset_b: Target patchset number
 
         Returns:
             Dict mapping file paths to file info
         """
+        base = f"?base={patchset_a}" if patchset_a is not None else ""
         return self.rest.get(
-            f"/changes/{change_number}/revisions/{patchset_b}"
-            f"/files?base={patchset_a}"
+            f"/changes/{change_number}/revisions/{patchset_b}/files{base}"
         )
 
     def _ssh_user(self, host: str) -> str:
