@@ -263,3 +263,69 @@ class TestTopFailuresOverAFlakyServer:
             "test_set_scripts": {"sc1": "sanity"},
             "sub_test_scripts": {"st1": "test_1"},
         }
+
+
+def _page(text="", status=200, url=BASE + "/x", content_type="text/html"):
+    resp = MagicMock(spec=requests.Response)
+    resp.status_code = status
+    resp.text = text
+    resp.url = url
+    resp.content = text.encode()
+    resp.headers = {"Content-Type": content_type}
+    return resp
+
+
+SIGNIN_PAGE = ('<form action="/sessions"><input name="authenticity_token" '
+               'value="tok"></form>')
+
+
+class TestWebRetry:
+    """The web sign-in and log download retry as the API reads do: a
+    proxied run saw one dropped CONNECT fail a cleanup-error lookup."""
+
+    def _web(self, c, gets, posts=None):
+        web = MagicMock(spec=requests.Session)
+        web.get.side_effect = gets
+        web.post.side_effect = posts or [_page(status=302)]
+        web.cookies = {}
+        c.session.cookies = MagicMock()
+        return web
+
+    def test_signin_survives_a_dropped_proxy_connection(self):
+        c = _client()
+        web = self._web(c, [
+            requests.exceptions.ProxyError("Unable to connect to proxy"),
+            _page(SIGNIN_PAGE),
+        ])
+        with patch("maloo_tool.client.requests.Session", return_value=web):
+            assert c._web_login() is web
+        assert web.get.call_count == 2
+        assert web.post.call_args.kwargs["allow_redirects"] is False
+
+    def test_download_is_retried(self):
+        c = _client()
+        c._web_session = MagicMock()
+        c.session.get.side_effect = [
+            requests.exceptions.ProxyError("Unable to connect to proxy"),
+            _page("zipdata", content_type="application/zip"),
+        ]
+        assert c.download_logs(TSID) == b"zipdata"
+
+    def test_gives_up_after_the_attempts(self):
+        c = _client()
+        web = self._web(c, [requests.exceptions.ProxyError("gone")]
+                        * GET_ATTEMPTS)
+        with patch("maloo_tool.client.requests.Session", return_value=web):
+            with pytest.raises(requests.exceptions.ProxyError,
+                               match="after 4 attempts"):
+                c._web_login()
+
+    def test_retest_post_is_not_repeated(self):
+        c = _client()
+        c._web_session = MagicMock(spec=requests.Session)
+        c._web_session.get.return_value = _page(
+            '<input name="authenticity_token" value="t">')
+        c._web_session.post.side_effect = requests.ConnectionError("reset")
+        with pytest.raises(requests.ConnectionError):
+            c.retest(SID)
+        assert c._web_session.post.call_count == 1

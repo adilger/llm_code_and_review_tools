@@ -116,6 +116,31 @@ class MalooClient:
             return body
         return body.get("data", [])
 
+    @staticmethod
+    def _retried(send, url: str, **kwargs) -> requests.Response:
+        """send(url, **kwargs), retried as _get retries its GETs.
+
+        Only for requests that are safe to repeat: page reads, the
+        sign-in and log downloads, never a retest or a ticket filing.
+        """
+        for attempt in range(1, GET_ATTEMPTS + 1):
+            try:
+                resp = send(url, **kwargs)
+            except RETRY_EXCEPTIONS as exc:
+                if attempt < GET_ATTEMPTS:
+                    time.sleep(0.5 * 2 ** (attempt - 1))
+                    continue
+                msg = f"{exc} (after {GET_ATTEMPTS} attempts)"
+                if isinstance(exc, requests.exceptions.ChunkedEncodingError):
+                    raise requests.ConnectionError(msg) from exc
+                raise type(exc)(msg) from exc
+            if (resp.status_code in RETRY_STATUSES
+                    and attempt < GET_ATTEMPTS):
+                time.sleep(0.5 * 2 ** (attempt - 1))
+                continue
+            return resp
+        raise AssertionError("unreachable")
+
     # -- Script name cache --
 
     def _names(self, endpoint: str) -> dict[str, str]:
@@ -473,7 +498,7 @@ class MalooClient:
             f"{self.config.base_url}/{BUGGABLE_PAGES[buggable_class]}"
             f"/{buggable_id}"
         )
-        resp = web.get(page_url, timeout=60)
+        resp = self._retried(web.get, page_url, timeout=60)
         resp.raise_for_status()
         if urlsplit(resp.url).path == SIGNIN_PATH:
             raise PermissionError(
@@ -917,7 +942,7 @@ class MalooClient:
         # Use a separate session without basic auth
         web = requests.Session()
         signin_url = f"{self.config.base_url}/signin"
-        resp = web.get(signin_url, timeout=30)
+        resp = self._retried(web.get, signin_url, timeout=30)
         resp.raise_for_status()
 
         # Extract CSRF token from form
@@ -936,7 +961,8 @@ class MalooClient:
         )
         action = action_m.group(1) if action_m else "/sessions"
 
-        web.post(
+        self._retried(
+            web.post,
             f"{self.config.base_url}{action}",
             data={
                 "authenticity_token": m.group(1),
@@ -945,7 +971,9 @@ class MalooClient:
                 "commit": "Sign in",
             },
             timeout=30,
-            allow_redirects=True,
+            # The session cookie comes with the redirect; following it
+            # fetches the whole test session list, some 850 KB.
+            allow_redirects=False,
         )
 
         # Also merge cookies into the main session for download_logs
@@ -960,7 +988,7 @@ class MalooClient:
     ) -> str:
         """Fetch the CSRF token from the test session page."""
         url = f"{self.config.base_url}/test_sessions/{session_id}"
-        resp = web.get(url, timeout=30)
+        resp = self._retried(web.get, url, timeout=30)
         resp.raise_for_status()
         # Try <input> hidden field first, then <meta> tag
         m = re.search(
@@ -992,8 +1020,8 @@ class MalooClient:
             f"{self.config.base_url}"
             f"/test_sets/{test_set_id}/download_logs"
         )
-        resp = self.session.get(
-            url, timeout=timeout, allow_redirects=True
+        resp = self._retried(
+            self.session.get, url, timeout=timeout, allow_redirects=True
         )
         resp.raise_for_status()
         content_type = resp.headers.get("Content-Type", "")
@@ -1086,7 +1114,7 @@ class MalooClient:
             f"?buggable_id={buggable_id}"
             f"&buggable_type={buggable_type}"
         )
-        resp = web.get(form_url, timeout=30)
+        resp = self._retried(web.get, form_url, timeout=30)
         resp.raise_for_status()
 
         # Extract default description if none provided
