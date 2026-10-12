@@ -9,8 +9,8 @@ version: 0.1.0
 `gerrit` (aliases `gc`, `gerrit-cli`) covers review comments, patch series
 sessions, change metadata and CI overview. Output is JSON; add
 `--envelope` for the full wrapper, skip `--pretty`. `gc examples` prints
-the built-in workflow cheatsheets, `gc explain <command>` details one
-command, and `gc describe` emits the machine-readable API.
+the built-in workflow cheatsheets, `gc explain <command>` details any
+command, and `gc describe` emits the machine-readable API for all of them.
 
 A change is addressed by full URL, bare number or Change-Id -- the
 Change-Id being the handle a checkout has, from the commit message. Most

@@ -636,12 +636,353 @@ Skip a conflicting change during reintegration and move to the next one.
         ],
         "related": ["continue-reintegration", "finish-patch"],
     },
+    "done": {
+        "summary": "Resolve a comment thread with 'Done'",
+        "description": """
+Reply 'Done' (or your own text) to a thread and resolve it. A shortcut for
+'gc reply --done'. The index is the one 'gc comments' printed.
+""",
+        "examples": [
+            {
+                "command": "gc done URL 0",
+                "description": "Reply 'Done' to thread 0 and resolve it",
+            },
+            {
+                "command": "gc done URL 2 \"Fixed in PS5\"",
+                "description": "Resolve thread 2 with your own text",
+            },
+        ],
+        "related": ["ack", "reply", "comments"],
+    },
+    "ack": {
+        "summary": "Resolve a comment thread with 'Acknowledged'",
+        "description": """
+Reply 'Acknowledged' (or your own text) to a thread and resolve it. A
+shortcut for 'gc reply --ack'. The index is the one 'gc comments' printed.
+""",
+        "examples": [
+            {
+                "command": "gc ack URL 1",
+                "description": "Acknowledge thread 1 and resolve it",
+            },
+        ],
+        "related": ["done", "reply", "comments"],
+    },
+    "info": {
+        "summary": "Patchsets, votes and CI status of a change",
+        "description": """
+One call for the state of a change: subject, status, every patchset with
+its upload date and uploader, each reviewer's votes, the enforced and
+optional Maloo results and pending retests for the current patchset, and
+the Jenkins build. Bot reviewers are left out unless --show-bots.
+
+For the text a reviewer posted with a vote, use
+'gc comments URL --all --include-system'.
+""",
+        "examples": [
+            {
+                "command": "gc info 64086",
+                "description": "Overview of change 64086",
+            },
+            {
+                "command": "gc info --show-bots URL",
+                "description": "Include bot reviewers",
+            },
+        ],
+        "related": ["series-info", "maloo", "comments"],
+    },
+    "series-info": {
+        "summary": "'gc info' for every patch in a series",
+        "description": """
+Find the series from any one of its patches and return 'gc info' for
+each patch, root first: patchsets, votes, CI status and Jenkins build.
+""",
+        "examples": [
+            {
+                "command": "gc series-info URL",
+                "description": "Info for every patch in the series",
+            },
+        ],
+        "related": ["info", "series-status", "related"],
+    },
+    "maloo": {
+        "summary": "Summarize Maloo CI results on a change",
+        "description": """
+Parse the Maloo messages on a change and summarize enforced and optional
+test results, passed and failed, with their links. Several changes may be
+given at once. --patchset picks a patchset other than the newest (single
+change only).
+""",
+        "examples": [
+            {
+                "command": "gc maloo URL",
+                "description": "CI results for the newest patchset",
+            },
+            {
+                "command": "gc maloo -r 4 URL",
+                "description": "CI results for patchset 4",
+            },
+            {
+                "command": "gc maloo 64086 64087 64088",
+                "description": "Several changes in one call",
+            },
+        ],
+        "related": ["info", "watch"],
+    },
+    "watch": {
+        "summary": "Run Maloo triage on a list of watched changes",
+        "description": """
+Read a JSON file holding an array of objects, each with at least a
+'gerrit_url', and run the 'gc maloo' triage on every one.
+""",
+        "examples": [
+            {
+                "command": "gc watch ~/patches_to_watch.json",
+                "description": "Triage every change in the file",
+            },
+        ],
+        "related": ["maloo", "info"],
+    },
+    "vote": {
+        "summary": "Set a label vote on a change",
+        "description": """
+Set a review label on the current patchset, such as Code-Review or
+Verified, with an optional message. 'label' is an alias.
+""",
+        "examples": [
+            {
+                "command": "gc vote URL Code-Review +1",
+                "description": "Vote Code-Review +1",
+            },
+            {
+                "command": "gc vote URL Code-Review -1 -m \"See inline comments\"",
+                "description": "Vote with a message",
+            },
+        ],
+        "related": ["message", "review"],
+    },
+    "message": {
+        "summary": "Post a change-level message",
+        "description": """
+Post a top-level message on a change, as the reply box of the Gerrit web
+UI does. It is not attached to a file or line. To vote at the same time,
+use 'gc vote -m'.
+""",
+        "examples": [
+            {
+                "command": "gc message URL \"Rebased on the new master\"",
+                "description": "Post a message on the change",
+            },
+        ],
+        "related": ["vote", "reply"],
+    },
+    "abandon": {
+        "summary": "Abandon a change",
+        "description": """
+Abandon a change, with an optional message given as a second argument or
+with -m. --dry-run shows what would be abandoned and changes nothing.
+""",
+        "examples": [
+            {
+                "command": "gc abandon URL \"Superseded by 64100\"",
+                "description": "Abandon with a message",
+            },
+            {
+                "command": "gc abandon --dry-run URL",
+                "description": "Show what would be abandoned",
+            },
+        ],
+        "related": ["restore"],
+    },
+    "restore": {
+        "summary": "Restore an abandoned change",
+        "description": """
+Bring an abandoned change back to open, with an optional message (-m).
+""",
+        "examples": [
+            {
+                "command": "gc restore URL -m \"Still needed\"",
+                "description": "Restore with a message",
+            },
+        ],
+        "related": ["abandon"],
+    },
+    "rebase": {
+        "summary": "Rebase a change on the server",
+        "description": """
+Ask Gerrit to rebase a change onto its parent's newest patchset, or onto
+the branch tip, without checking anything out. Gerrit refuses a rebase
+that conflicts or has nothing to do.
+""",
+        "examples": [
+            {
+                "command": "gc rebase URL",
+                "description": "Rebase the change on the server",
+            },
+        ],
+        "related": ["related", "checkout", "upload"],
+    },
+    "set-topic": {
+        "summary": "Set a change's topic",
+        "description": """
+Set or replace the topic of a change. Changes sharing a topic are grouped
+together, and 'gc graph' follows them.
+""",
+        "examples": [
+            {
+                "command": "gc set-topic URL pcc-ro",
+                "description": "Set the topic to pcc-ro",
+            },
+        ],
+        "related": ["hashtag", "graph"],
+    },
+    "hashtag": {
+        "summary": "List, add or remove a change's hashtags",
+        "description": """
+With no option, list the hashtags on a change. --add and --remove may be
+repeated. Hashtags are free-form and can coexist with the topic.
+""",
+        "examples": [
+            {
+                "command": "gc hashtag URL",
+                "description": "List the hashtags",
+            },
+            {
+                "command": "gc hashtag URL --add ec --remove wip",
+                "description": "Add one hashtag and remove another",
+            },
+        ],
+        "related": ["set-topic", "graph"],
+    },
+    "related": {
+        "summary": "The git relation chain of a change",
+        "description": """
+List every change in the relation chain of a change, root ancestor to tip,
+in order: subject, status, Change-Id, the related patchset's commit and,
+once merged, the commit that landed (merged_commit).
+""",
+        "examples": [
+            {
+                "command": "gc related URL",
+                "description": "List the chain the change belongs to",
+            },
+        ],
+        "related": ["series-info", "series-status", "graph"],
+    },
+    "checkout": {
+        "summary": "Fetch a change and check it out",
+        "description": """
+Fetch a change's ref into the current git repository and check it out.
+HEAD is detached unless --branch names a branch to create. --patchset
+picks a patchset other than the newest. 'co' is an alias.
+""",
+        "examples": [
+            {
+                "command": "gc checkout URL",
+                "description": "Check out the newest patchset, detached",
+            },
+            {
+                "command": "gc checkout -r 3 -b review-64086 URL",
+                "description": "Patchset 3 on a new branch",
+            },
+        ],
+        "related": ["work-on-patch", "review"],
+    },
+    "graph": {
+        "summary": "Interactive graph of every change related to a series",
+        "description": """
+Build an HTML graph of all the changes related to a series: branches,
+abandoned forks and stale patchsets, plus the series sharing its topic
+or hashtags. The argument may be a change or a JIRA ticket (LU-18222),
+which picks the anchor change itself. Opens it in a browser unless
+--no-open; -o saves it. --conflicts REPO trial-merges the in-flight
+changes in a local clone. Unlike 'series-status', which follows one
+linear chain, this shows the whole topology.
+""",
+        "examples": [
+            {
+                "command": "gc graph URL",
+                "description": "Graph the series and open it",
+            },
+            {
+                "command": "gc graph LU-18222 --no-open -o /tmp/lu18222.html",
+                "description": "Graph a ticket's changes into a file",
+            },
+        ],
+        "related": ["series-status", "related", "set-topic", "hashtag"],
+    },
+    "sashiko-review": {
+        "summary": "Review a change with a Sashiko server",
+        "description": """
+Send a change to a running Sashiko instance for automated review, wait
+for it (--timeout minutes), and post its findings as inline comments.
+--dry-run shows the findings without posting; --vote adds a Code-Review
+vote from their severity. 'sr' is an alias.
+""",
+        "examples": [
+            {
+                "command": "gc sashiko-review --dry-run 64591",
+                "description": "Review and show findings only",
+            },
+        ],
+        "related": ["review"],
+    },
+    "describe": {
+        "summary": "Machine-readable description of the commands",
+        "description": """
+Print JSON describing the commands, their arguments, output fields and
+suggested next actions. --command limits it to one command.
+""",
+        "examples": [
+            {
+                "command": "gc describe",
+                "description": "Describe every command",
+            },
+            {
+                "command": "gc describe --command comments",
+                "description": "Describe one command",
+            },
+        ],
+        "related": ["explain", "examples"],
+    },
+    "examples": {
+        "summary": "Workflow cheatsheets",
+        "description": """
+Print example command sequences for a workflow: quick (the default),
+staging, series, reviewers, or all.
+""",
+        "examples": [
+            {
+                "command": "gc examples staging",
+                "description": "The staged-reply workflow",
+            },
+        ],
+        "related": ["explain", "describe"],
+    },
+    "explain": {
+        "summary": "Detailed usage and examples for one command",
+        "description": """
+Describe one command with examples and related commands. Aliases are
+accepted. 'gc <command> --help' lists every argument.
+""",
+        "examples": [
+            {
+                "command": "gc explain comments",
+                "description": "Explain the comments command",
+            },
+        ],
+        "related": ["examples", "describe"],
+    },
 }
 
 # Aliases for command lookup
 COMMAND_ALIASES = {
     "extract": "comments",
     "i": "interactive",
+    "co": "checkout",
+    "s": "search",
+    "label": "vote",
+    "sr": "sashiko-review",
 }
 
 
@@ -845,14 +1186,16 @@ def cmd_examples(args):
 
 def cmd_describe(args):
     """Show machine-readable API description."""
-    from ..describe import get_tool_description
+    from ..cli import build_parser
+    from ..describe import complete_description, get_tool_description
 
     pretty = getattr(args, 'pretty', False)
     command_name = getattr(args, 'command_name', None)
-    tool_desc = get_tool_description()
+    tool_desc = complete_description(get_tool_description(), build_parser())
 
     if command_name:
         normalized = command_name.replace(".", " ")
+        normalized = COMMAND_ALIASES.get(normalized, normalized)
         matching = [c for c in tool_desc.commands if c.name == normalized]
         if not matching:
             sys.exit(output_error(

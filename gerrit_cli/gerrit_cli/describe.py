@@ -4,9 +4,94 @@ Provides the full command surface so LLMs can discover capabilities
 without parsing --help text.
 """
 
+import argparse
+
 from llm_tool_common import Argument, Command, ToolDescription
 
 from . import __version__
+
+
+def registered_commands(parser: argparse.ArgumentParser) -> dict[str, tuple[str, argparse.ArgumentParser]]:
+    """Every subcommand name and alias the parser accepts, mapped to
+    (canonical name, subparser)."""
+    sub_action = next(a for a in parser._actions
+                      if isinstance(a, argparse._SubParsersAction))
+    canonical: dict[int, str] = {}
+    names = {}
+    for name, sub in sub_action.choices.items():
+        canonical.setdefault(id(sub), name)
+        names[name] = (canonical[id(sub)], sub)
+    return names
+
+
+def _argument_from_action(action: argparse.Action) -> Argument:
+    if isinstance(action, argparse._SubParsersAction):
+        return Argument(name=action.dest or "subcommand",
+                        description=action.help or "Subcommand",
+                        required=bool(action.required),
+                        choices=list(action.choices))
+    if action.option_strings:
+        longs = [o for o in action.option_strings if o.startswith("--")]
+        name = longs[0] if longs else action.option_strings[0]
+    else:
+        name = action.dest
+    if isinstance(action, (argparse._StoreTrueAction, argparse._StoreFalseAction)):
+        arg_type = "boolean"
+    elif action.type is int:
+        arg_type = "integer"
+    elif isinstance(action, (argparse._AppendAction, argparse._ExtendAction)) or \
+            action.nargs in ("*", "+"):
+        arg_type = "list"
+    else:
+        arg_type = "string"
+    help_text = action.help or ""
+    try:
+        help_text = help_text % {"default": action.default}
+    except (KeyError, TypeError, ValueError):
+        pass
+    default = action.default
+    if default is argparse.SUPPRESS or isinstance(default, list):
+        default = None
+    return Argument(
+        name=name,
+        description=help_text,
+        type=arg_type,
+        required=bool(action.required),
+        default=default,
+        choices=[str(c) for c in action.choices] if action.choices else None,
+    )
+
+
+def command_from_parser(name: str, sub: argparse.ArgumentParser, summary: str = "") -> Command:
+    """A Command built from a subparser, for commands the table below lacks."""
+    sub.prog = f"gc {name}"
+    usage = " ".join(sub.format_usage().split())
+    if usage.startswith("usage: "):
+        usage = usage[len("usage: "):]
+    usage = usage.replace(" [-h]", "")
+    return Command(
+        name=name,
+        description=" ".join((sub.description or summary or "").split()),
+        usage=usage,
+        arguments=[_argument_from_action(a) for a in sub._actions
+                   if not isinstance(a, argparse._HelpAction)],
+    )
+
+
+def complete_description(tool_desc: ToolDescription, parser: argparse.ArgumentParser) -> ToolDescription:
+    """Add every registered command the curated table leaves out, built
+    from its parser, so describe never omits a command."""
+    known = {c.name for c in tool_desc.commands}
+    sub_action = next(a for a in parser._actions
+                      if isinstance(a, argparse._SubParsersAction))
+    helps = {a.dest: a.help for a in sub_action._choices_actions}
+    seen = set()
+    for canon, sub in registered_commands(parser).values():
+        if canon in known or canon in seen:
+            continue
+        seen.add(canon)
+        tool_desc.commands.append(command_from_parser(canon, sub, helps.get(canon) or ""))
+    return tool_desc
 
 
 def get_tool_description() -> ToolDescription:
