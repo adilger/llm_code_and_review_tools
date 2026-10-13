@@ -676,6 +676,11 @@ its upload date and uploader, each reviewer's votes, the enforced and
 optional Maloo results and pending retests for the current patchset, and
 the Jenkins build. Bot reviewers are left out unless --show-bots.
 
+Maloo's vote is the verdict (ci.maloo_vote): a failure a retest has since
+passed is not counted. A patchset that only changed the commit message is
+not built or tested again; its results are the earlier patchset's, named
+in ci.results_patchset.
+
 For the text a reviewer posted with a vote, use
 'gc comments URL --all --include-system'.
 """,
@@ -710,8 +715,13 @@ each patch, root first: patchsets, votes, CI status and Jenkins build.
         "description": """
 Parse the Maloo messages on a change and summarize enforced and optional
 test results, passed and failed, with their links. Several changes may be
-given at once. --patchset picks a patchset other than the newest (single
-change only).
+given at once. --patchset picks a patchset other than the newest tested
+one (single change only).
+
+Maloo's vote is the verdict: once it is +1, earlier enforced failures show
+as PASSED_LATER and are not counted. A patchset that only changed the
+commit message is not tested again, so the results shown are the earlier
+patchset's ("patchset" against "current_patchset").
 """,
         "examples": [
             {

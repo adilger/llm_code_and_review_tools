@@ -128,6 +128,7 @@ class TestSuggestedCommandsExist:
     NOT_COMMANDS = {
         "workflows",  # "typical gerrit workflows" (examples description)
         "gc",         # "Use 'gc' or 'gerrit-cli' as short aliases" (describe)
+        "janitor",    # "the gerrit janitor", a CI bot (ci_parse)
     }
 
     def test_suggested_commands_are_registered(self):

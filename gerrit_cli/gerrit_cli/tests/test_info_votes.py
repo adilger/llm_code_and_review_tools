@@ -13,7 +13,7 @@ from gerrit_cli.commands.ci import _has_negative_vote, _info_for_change
 class FakeClient:
     """Just enough of GerritCommentsClient for _info_for_change."""
 
-    def get_change_detail(self, change_number):
+    def get_change(self, change_number, options=None):
         return {
             "current_revision": "abc",
             "revisions": {
@@ -37,9 +37,6 @@ class FakeClient:
             # No approvals at all: dropped whatever the name.
             {"name": "Lurker", "approvals": {}},
         ]
-
-    def get_messages(self, change_number):
-        return []
 
 
 def _names(show_bots):

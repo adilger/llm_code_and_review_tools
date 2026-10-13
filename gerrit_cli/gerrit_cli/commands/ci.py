@@ -2,6 +2,7 @@
 
 import sys
 
+from .. import ci_parse
 from ..errors import ErrorCode, ExitCode
 from ._helpers import (
     BOT_REVIEWER_NAMES,
@@ -12,133 +13,82 @@ from ._helpers import (
     output_success,
 )
 
+# One GET carries everything `info` and `maloo` read: the revisions and
+# their kinds, the bot messages, and every vote on every label.
+CHANGE_OPTIONS = [
+    "ALL_REVISIONS",
+    "CURRENT_COMMIT",
+    "DETAILED_ACCOUNTS",
+    "DETAILED_LABELS",
+    "MESSAGES",
+]
+
+
+CI_STATUS = {
+    "PASS": "all passing",
+    "FAIL": "failing",
+    "RUNNING": "running",
+    "NONE": "no results",
+}
+
+
+def _standing_failures(tests):
+    """Enforced failures Maloo still counts against the change.
+
+    A failure a later pass on the same platform cleared is already gone
+    from failed_tests.  A Maloo +1 clears the rest: a retest that passes
+    often gets no message of its own, only Maloo's new vote.
+    """
+    if tests["maloo_vote"] > 0:
+        return 0
+    return sum(len(t["failures"]) for t in tests["failed_tests"])
+
 
 def _maloo_for_change(client, change_number, patchset=None):
     """Get Maloo CI results for a single change. Returns a dict."""
-    change = client.get_change_detail(change_number)
-    msgs = client.get_messages(change_number)
+    change = client.get_change(change_number, CHANGE_OPTIONS)
+    current = ci_parse.current_ps(change)
+    # A commit-message-only patchset is not built or tested again: its
+    # results, and the votes Gerrit copied to it, are an earlier one's.
+    patchset = patchset or ci_parse.ci_relevant_ps(change)
+    tests = ci_parse.parse_tests(change, patchset)
 
-    if not patchset:
-        patchset = max(
-            (m.get('_revision_number', 0) for m in msgs),
-            default=0,
-        )
-
-    # Get patchset upload date from revisions
     patchset_uploaded = None
-    for rev_id, rev in change.get("revisions", {}).items():
+    for rev in change.get("revisions", {}).values():
         if rev.get("_number") == patchset:
             patchset_uploaded = rev.get("created")
             break
 
-    enforced_results = {}
-    optional_failed = []
-    retests = []
-
-    for m in msgs:
-        author = m.get('author', {}).get('name', '')
-        ps = m.get('_revision_number', 0)
-        text = m.get('message', '')
-
-        if author == 'Autotest' and ps == patchset:
-            if 'retest' in text.lower():
-                retests.append({
-                    'date': m.get('date', ''),
-                    'message': text.strip()[:150],
-                })
-
-        if author != 'Maloo':
-            continue
-        if ps != patchset:
-            continue
-
-        for kind in ('enforced', 'optional'):
-            for status in ('Failed', 'Passed'):
-                marker = f'{status} {kind} test '
-                if marker not in text:
-                    continue
-                rest = text.split(marker, 1)[1]
-                name_plat = rest.split(' uploaded')[0].strip()
-                parts = name_plat.split(' on ', 1)
-                test_name = parts[0].strip()
-                platform = parts[1].strip() if len(parts) > 1 else ''
-                url = ''
-                test_detail = ''
-                if 'https://testing.' in text:
-                    after_marker = text[text.index('https://testing.'):]
-                    url = after_marker.split()[0]
-                    after_url = after_marker[len(url):].strip()
-                    if after_url:
-                        test_detail = after_url
-
-                if kind == 'enforced':
-                    if test_name not in enforced_results:
-                        enforced_results[test_name] = {
-                            'pass': [], 'fail': [], 'last': ''}
-                    r = enforced_results[test_name]
-                    r['last'] = max(r['last'], m.get('date', ''))
-                    bucket = 'pass' if status == 'Passed' else 'fail'
-                    entry = {'platform': platform, 'url': url}
-                    if test_detail:
-                        entry['detail'] = test_detail
-                    enforced_results[test_name][bucket].append(entry)
-                elif status == 'Failed':
-                    entry = {'test': test_name, 'platform': platform, 'url': url}
-                    if test_detail:
-                        entry['detail'] = test_detail
-                    optional_failed.append(entry)
-
-    # A retest is pending only while it is newer than the group's latest
-    # verdict. After the retest runs, Maloo posts a new verdict.
-    retested_groups = set()
-    for rt in retests:
-        msg = rt['message'].lower()
-        for test_name, r in enforced_results.items():
-            if test_name.lower() in msg and rt['date'] > r['last']:
-                retested_groups.add(test_name)
-
-    enforced_summary = []
-    total_pass = 0
-    total_fail = 0
-    for test_name in sorted(enforced_results):
-        r = enforced_results[test_name]
-        p = len(r['pass'])
-        f = len(r['fail'])
-        total_pass += p
-        total_fail += f
-        if f and p:
-            verdict = 'MIXED'
-        elif f:
-            verdict = 'FAIL'
-        else:
-            verdict = 'PASS'
+    passed_later = tests["maloo_vote"] > 0
+    enforced = []
+    for t in tests["failed_tests"]:
         entry = {
-            'test': test_name, 'verdict': verdict,
-            'passed': p, 'failed': f,
+            "test": t["name"],
+            "verdict": "PASSED_LATER" if passed_later else "FAIL",
+            "failed": len(t["failures"]),
+            "failures": t["failures"],
         }
-        if r['fail']:
-            entry['failures'] = r['fail']
-        if test_name in retested_groups:
-            entry['retest_pending'] = True
-        enforced_summary.append(entry)
+        if t["retest_pending"]:
+            entry["retest_pending"] = True
+        enforced.append(entry)
 
     data = {
-        'change_number': change_number,
-        'subject': change.get('subject', ''),
-        'patchset': patchset,
-        'patchset_uploaded': patchset_uploaded,
-        'patchset_age': _patchset_age(patchset_uploaded) if patchset_uploaded else None,
-        'enforced': {
-            'total_pass': total_pass,
-            'total_fail': total_fail,
-            'tests': enforced_summary,
+        "change_number": change_number,
+        "subject": change.get("subject", ""),
+        "patchset": patchset,
+        "current_patchset": current,
+        "patchset_uploaded": patchset_uploaded,
+        "patchset_age": _patchset_age(patchset_uploaded) if patchset_uploaded else None,
+        "state": tests["state"],
+        "maloo_vote": tests["maloo_vote"],
+        "enforced": {
+            "total_fail": _standing_failures(tests),
+            "tests": enforced,
         },
-        'optional_failures': optional_failed,
+        "optional_failures": tests["optional_failures"],
     }
-
-    if retests:
-        data['retests'] = retests
-
+    if tests["retests"]:
+        data["retests"] = tests["retests"]
     return data
 
 
@@ -204,7 +154,7 @@ def _info_for_change(client, change_number, show_bots=False):
     Extracts patchset history, reviewers, CI status, and Jenkins build
     for the given change number. Used by both cmd_info and cmd_series_info.
     """
-    change = client.get_change_detail(change_number)
+    change = client.get_change(change_number, CHANGE_OPTIONS)
 
     # Build patchset info with upload dates and age
     revisions = change.get("revisions", {})
@@ -249,105 +199,27 @@ def _info_for_change(client, change_number, show_bots=False):
             "approvals": approvals,
         })
 
-    # Get CI status via maloo message parsing
-    msgs = client.get_messages(change_number)
+    results_ps = ci_parse.ci_relevant_ps(change)
+    tests = ci_parse.parse_tests(change)
+    build = ci_parse.parse_build(change)
 
-    enforced_results = {}
-    optional_failed = []
-    retests_pending = []
+    ci = {
+        "status": CI_STATUS[tests["state"]],
+        "maloo_vote": tests["maloo_vote"],
+        "enforced_fail": _standing_failures(tests),
+        "optional_fail": tests["optional_fail"],
+        "retests_pending": sum(1 for t in tests["failed_tests"] if t["retest_pending"]),
+    }
+    if results_ps != current_patchset:
+        ci["results_patchset"] = results_ps
 
-    for m in msgs:
-        author = m.get('author', {}).get('name', '')
-        ps = m.get('_revision_number', 0)
-        text = m.get('message', '')
-
-        if author == 'Maloo' and ps == current_patchset:
-            for kind in ('enforced', 'optional'):
-                for status in ('Failed', 'Passed'):
-                    marker = f'{status} {kind} test '
-                    if marker not in text:
-                        continue
-                    rest = text.split(marker, 1)[1]
-                    name_plat = rest.split(' uploaded')[0].strip()
-                    parts = name_plat.split(' on ', 1)
-                    test_name = parts[0].strip()
-                    platform = parts[1].strip() if len(parts) > 1 else ''
-                    url = ''
-                    if 'https://testing.' in text:
-                        after_marker = text[text.index('https://testing.'):]
-                        url = after_marker.split()[0]
-
-                    if kind == 'enforced':
-                        if test_name not in enforced_results:
-                            enforced_results[test_name] = {'pass': 0, 'fail': 0}
-                        enforced_results[test_name]['pass' if status == 'Passed' else 'fail'] += 1
-                    elif status == 'Failed':
-                        optional_failed.append(test_name)
-
-        # Track retests
-        if author == 'Autotest' and ps == current_patchset:
-            if 'retest' in text.lower():
-                retests_pending.append({
-                    'date': m.get('date', ''),
-                    'message': text[:120],
-                })
-
-    # Parse Jenkins build status from messages
     jenkins_build = None
-    for m in reversed(msgs):
-        author = m.get('author', {}).get('name', '')
-        ps = m.get('_revision_number', 0)
-        text = m.get('message', '')
-
-        if author in ('jenkins', 'Jenkins') and ps == current_patchset:
-            build_url = ''
-            build_number = ''
-            if 'build.whamcloud.com' in text:
-                for word in text.split():
-                    if 'build.whamcloud.com' in word:
-                        build_url = word.rstrip(':')
-                        # Extract build number from URL
-                        parts = build_url.rstrip('/').split('/')
-                        if parts:
-                            build_number = parts[-1]
-                        break
-            if 'Build Successful' in text or 'Verified+1' in text:
-                jenkins_build = {
-                    'status': 'SUCCESS',
-                    'build_url': build_url,
-                    'build_number': build_number,
-                }
-                break
-            elif 'Build Failed' in text or 'Verified-1' in text:
-                reason = 'FAILURE'
-                if 'ABORTED' in text:
-                    reason = 'ABORTED'
-                jenkins_build = {
-                    'status': reason,
-                    'build_url': build_url,
-                    'build_number': build_number,
-                }
-                break
-            elif 'Build Started' in text:
-                jenkins_build = {
-                    'status': 'BUILDING',
-                    'build_url': build_url,
-                    'build_number': build_number,
-                }
-                break
-
-    # Summarize CI
-    enforced_pass = sum(r['pass'] for r in enforced_results.values())
-    enforced_fail = sum(r['fail'] for r in enforced_results.values())
-
-    ci_status = "no results"
-    if enforced_pass or enforced_fail:
-        if enforced_fail == 0:
-            ci_status = "all passing"
-        elif enforced_pass == 0:
-            ci_status = "failing"
-        else:
-            ci_status = "mixed"
+    if build["state"] != "NONE":
+        jenkins_build = {
+            "status": build["state"],
+            "build_url": build["url"],
+            "build_number": build["number"],
+        }
 
     return {
         "change_number": change_number,
@@ -361,13 +233,7 @@ def _info_for_change(client, change_number, show_bots=False):
         "current_revision": current_revision,
         "patchsets": patchsets,
         "reviewers": reviewers,
-        "ci": {
-            "status": ci_status,
-            "enforced_pass": enforced_pass,
-            "enforced_fail": enforced_fail,
-            "optional_fail": len(optional_failed),
-            "retests_pending": len(retests_pending),
-        },
+        "ci": ci,
         "jenkins_build": jenkins_build,
     }
 

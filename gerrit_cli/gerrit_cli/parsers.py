@@ -905,15 +905,18 @@ def add_maloo_parser(subparsers):
         "maloo",
         help="Triage Maloo test results for a change",
         description="Parse Maloo test messages and show a summary "
-                    "of enforced/optional pass/fail results. "
-                    "Accepts multiple URLs for batch mode.",
+                    "of enforced/optional pass/fail results. Maloo's vote "
+                    "is the verdict: a failure it has since passed is shown "
+                    "as PASSED_LATER. Accepts multiple URLs for batch mode.",
     )
     parser.add_argument("url", nargs="+", help="Gerrit change URL(s), number(s) or Change-Id(s)")
     parser.add_argument(
         "--patchset", "-r",
         type=int,
         default=None,
-        help="Patchset number (default: latest). Only for single-URL mode.",
+        help="Patchset number (default: the latest one tested; a "
+             "commit-message-only patchset is not tested again). "
+             "Only for single-URL mode.",
     )
     parser.add_argument(
         "--pretty", "-p",
