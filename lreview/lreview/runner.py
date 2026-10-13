@@ -50,6 +50,12 @@ STATUS_CLEAN = "clean"
 STATUS_FAILED = "failed"
 STATUS_TIMEOUT = "timeout"
 STATUS_INVALID_JSON = "invalid-json"
+STATUS_STALLED = "stalled"
+
+# Seconds a review may write nothing to its log before it is taken to
+# have stalled.  The longest quiet stretch in 196 codex and 32 claude
+# reviews was under four minutes.
+DEFAULT_STALL_TIMEOUT = 600
 
 # Grace period between SIGTERM and SIGKILL when a review times out
 _KILL_GRACE_SECONDS = 15
@@ -305,6 +311,8 @@ class ReviewResult:
     log_path: Optional[Path] = None
     error: Optional[str] = None
     telemetry: Optional[dict] = None
+    # One entry per attempt that stalled (see stall_point)
+    stalls: list = field(default_factory=list)
 
 
 @dataclass
@@ -315,6 +323,10 @@ class BatchConfig:
     prompts_dir: Path = Path.home() / "review-prompts" / "kernel"
     jobs: int = 5
     timeout: int = 7200
+    # Kill a review whose log has not grown for this many seconds (0:
+    # never), and start it once more unless stall_retry is off
+    stall_timeout: float = DEFAULT_STALL_TIMEOUT
+    stall_retry: bool = True
     keep_worktrees: bool = False
     mode: str = "full"
     agent: str = "claude"
@@ -352,6 +364,9 @@ class BatchConfig:
                 f"mode must be one of {REVIEW_MODES}, got {self.mode!r}")
         if self.jobs < 1:
             raise ValueError(f"jobs must be >= 1, got {self.jobs}")
+        if self.stall_timeout < 0:
+            raise ValueError(
+                f"stall_timeout must be >= 0, got {self.stall_timeout}")
 
 
 def review_prompt(config: BatchConfig,
@@ -638,6 +653,18 @@ def detect_model(log_path: Optional[Path],
     return None
 
 
+# A running review quiet this long says so on the status line
+QUIET_NOTE_SECONDS = 120
+
+
+def _quiet_for(log_path: Path) -> float:
+    """Seconds since the review's log last grew."""
+    try:
+        return max(0.0, time.time() - log_path.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
 class ProgressTracker:
     """Tracks running reviews and maintains the live status line.
 
@@ -681,6 +708,9 @@ class ProgressTracker:
                         part += f" {log_path.stat().st_size // 1024}KB"
                     except OSError:
                         pass
+                quiet = _quiet_for(log_path)
+                if quiet >= QUIET_NOTE_SECONDS:
+                    part += f" quiet {_elapsed(quiet)}"
                 parts.append(part)
             return (f"running: {', '.join(parts)} | "
                     f"done {self.done}/{self.total}")
@@ -746,21 +776,33 @@ def _ask_for_metadata(config: BatchConfig, change, log_path: Path,
          f"{METADATA_JSON_NAME}; asking for it once")
     try:
         _run_agent(cmd, worktree_dir, nudge_log,
-                   min(config.timeout, _METADATA_NUDGE_TIMEOUT), extra_env)
-    except (subprocess.TimeoutExpired, OSError) as exc:
+                   min(config.timeout, _METADATA_NUDGE_TIMEOUT), extra_env,
+                   stall_timeout=config.stall_timeout)
+    except (subprocess.TimeoutExpired, ReviewStalled, OSError) as exc:
         _log(f"[{change.slug}] warning: asking for {METADATA_JSON_NAME} "
              f"failed: {exc}")
         return None
     return parse_final_usage(nudge_log)
 
 
+class ReviewStalled(Exception):
+    """The agent wrote nothing to its log for the stall limit."""
+
+    def __init__(self, silent_s: float):
+        super().__init__(f"no output for {int(silent_s)}s")
+        self.silent_s = silent_s
+
+
 def _run_agent(cmd: list[str], cwd: Path, log_path: Path,
-               timeout: int, extra_env: Optional[dict] = None,
-               stdin_path: Optional[Path] = None) -> int:
+               timeout: float, extra_env: Optional[dict] = None,
+               stdin_path: Optional[Path] = None,
+               stall_timeout: float = 0) -> int:
     """Run the agent in its own process group; kill the whole group on
     timeout so MCP servers / hook children don't outlive the review.
 
-    Raises subprocess.TimeoutExpired after the group is killed.
+    Raises subprocess.TimeoutExpired after the group is killed, or
+    ReviewStalled when stall_timeout is set and the log has not grown
+    for that long.
     """
     with open(log_path, "w") as log_file:
         env = os.environ.copy()
@@ -786,8 +828,8 @@ def _run_agent(cmd: list[str], cwd: Path, log_path: Path,
         with _RUNNING_PGIDS_LOCK:
             _RUNNING_PGIDS.add(proc.pid)
         try:
-            return proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+            return _wait_for_agent(proc, log_file, timeout, stall_timeout)
+        except (subprocess.TimeoutExpired, ReviewStalled):
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
             except ProcessLookupError:
@@ -804,6 +846,113 @@ def _run_agent(cmd: list[str], cwd: Path, log_path: Path,
         finally:
             with _RUNNING_PGIDS_LOCK:
                 _RUNNING_PGIDS.discard(proc.pid)
+
+
+def _wait_for_agent(proc, log_file, timeout: float,
+                    stall_timeout: float) -> int:
+    """Wait for the agent to exit, watching its log for progress."""
+    if not stall_timeout:
+        return proc.wait(timeout=timeout)
+    deadline = time.monotonic() + timeout
+    poll = min(5.0, max(0.05, stall_timeout / 10))
+    last_size = -1
+    last_growth = time.monotonic()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        try:
+            return proc.wait(timeout=min(poll, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+        size = os.fstat(log_file.fileno()).st_size
+        now = time.monotonic()
+        if size != last_size:
+            last_size, last_growth = size, now
+        elif now - last_growth >= stall_timeout:
+            raise ReviewStalled(now - last_growth)
+
+
+def stall_point(log_path: Path) -> dict:
+    """What a stalled review was waiting on, from its event log.
+
+    Returns {"waiting_on": "start" | "tool" | "model", "detail": text}:
+    "start" when the agent wrote no event at all, "tool" when a tool
+    call (a codex command, a claude tool use) was issued and never
+    answered, naming the newest such call, else "model".
+    """
+    try:
+        with open(log_path, errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    pending: dict = {}
+    last = None
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or not obj.get("type"):
+            continue
+        kind = obj["type"]
+        item = obj.get("item") if isinstance(obj.get("item"), dict) else {}
+        if kind == "item.started" and item.get("id"):
+            what = item.get("command") or item.get("type") or "a tool call"
+            pending[item["id"]] = f"command {' '.join(str(what).split())}"
+        elif kind == "item.completed" and item.get("id"):
+            pending.pop(item["id"], None)
+        message = obj.get("message")
+        content = (message.get("content")
+                   if isinstance(message, dict) else None)
+        for block in content if isinstance(content, list) else ():
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("id"):
+                from .telemetry import _describe
+                pending[block["id"]] = "tool " + _describe(
+                    block.get("name") or "?", block.get("input"))
+            elif block.get("type") == "tool_result":
+                pending.pop(block.get("tool_use_id"), None)
+        last = obj
+    if last is None:
+        return {"waiting_on": "start",
+                "detail": "the agent wrote no events at all"}
+    if pending:
+        detail = list(pending.values())[-1]
+        if len(detail) > 200:
+            detail = detail[:197] + "..."
+        return {"waiting_on": "tool", "detail": detail}
+    item = last.get("item") if isinstance(last.get("item"), dict) else {}
+    kind = last["type"]
+    if item.get("type"):
+        kind += f" {item['type']}"
+    elif last.get("subtype"):
+        kind += f" {last['subtype']}"
+    elif isinstance(last.get("message"), dict):
+        blocks = last["message"].get("content")
+        if isinstance(blocks, list) and blocks:
+            kinds = {b.get("type") for b in blocks if isinstance(b, dict)}
+            kind += " " + "/".join(sorted(k for k in kinds if k))
+    return {"waiting_on": "model",
+            "detail": f"no tool call was running; the last event was {kind}"}
+
+
+def stall_error(stalls: list, stall_timeout: float) -> str:
+    """The error a review that stalled for good reports."""
+    last = stalls[-1]
+    error = (f"no output for {last['silent_s']}s "
+             f"(--stall-timeout {int(stall_timeout)}), waiting on "
+             f"{_STALL_WAITING[last['waiting_on']]}: {last['detail']}")
+    if len(stalls) > 1:
+        error += (f"; the first attempt stalled too, after "
+                  f"{stalls[0]['silent_s']}s")
+    return error
+
+
+_STALL_WAITING = {"start": "the agent to start",
+                  "tool": "a tool call",
+                  "model": "the model"}
 
 
 def _collect_json(source: Path, dest: Path, validate=None):
@@ -863,6 +1012,15 @@ def run_review(
     session=None,
 ) -> ReviewResult:
     """Run one headless kreview in its worktree and collect the output."""
+    stalls: list = []
+    result = _run_review(config, change, worktree_dir, log_path, session,
+                         stalls)
+    result.stalls = stalls
+    return result
+
+
+def _run_review(config, change, worktree_dir, log_path, session,
+                stalls: list) -> ReviewResult:
     tag = artifact_tag(config.mode)
     json_prefix = ("review-result"
                    if getattr(change, "provider", None) == "github"
@@ -878,18 +1036,58 @@ def run_review(
             review_prompt(config, change, session, worktree_dir))
     start = time.monotonic()
 
+    def run(cmd, stdin_path=None) -> int:
+        left = max(1.0, config.timeout - (time.monotonic() - start))
+        return _run_agent(cmd, worktree_dir, log_path, left, extra_env,
+                          stdin_path, config.stall_timeout)
+
     _log(f"[{change.slug}] {console.color('cyan', 'review started')}: "
          f"{change.subject[:60]}")
     try:
-        returncode = _run_agent(cmd, worktree_dir, log_path,
-                                config.timeout, extra_env, stdin_path)
-        if (session is not None and returncode != 0
-                and _NO_SESSION_TEXT in _read_tail(log_path, 4096)):
-            _log(f"[{change.slug}] note: Claude could not resume session "
-                 f"{session.session_id}; starting a fresh one")
-            cmd = build_agent_cmd(config, change, None, worktree_dir)
-            returncode = _run_agent(cmd, worktree_dir, log_path,
-                                    config.timeout, extra_env)
+        while True:
+            try:
+                returncode = run(cmd, stdin_path)
+                if (session is not None and returncode != 0
+                        and _NO_SESSION_TEXT in _read_tail(log_path, 4096)):
+                    _log(f"[{change.slug}] note: Claude could not resume "
+                         f"session {session.session_id}; starting a fresh "
+                         "one")
+                    session = None
+                    cmd = build_agent_cmd(config, change, None,
+                                          worktree_dir)
+                    returncode = run(cmd)
+                break
+            except ReviewStalled as exc:
+                stall = stall_point(log_path)
+                stall["silent_s"] = int(exc.silent_s)
+                stall["tokens"] = live_token_count(log_path)
+                stalls.append(stall)
+                left = config.timeout - (time.monotonic() - start)
+                if (len(stalls) > 1 or not config.stall_retry
+                        or left < 2 * config.stall_timeout):
+                    raise
+                # The stalled attempt's log is kept beside the review's,
+                # named so that nothing taking kreview-*.log picks it up.
+                kept = log_path.with_suffix(".stalled.jsonl")
+                try:
+                    log_path.replace(kept)
+                    stall["log"] = kept.name
+                except OSError:
+                    pass
+                _remove_artifacts(worktree_dir)
+                _log(f"[{change.slug}] {console.color('yellow', 'STALLED')}"
+                     f" after {stall['silent_s']}s without output, waiting "
+                     f"on {_STALL_WAITING[stall['waiting_on']]} "
+                     f"({stall['detail']}); starting it once more")
+    except ReviewStalled:
+        duration = time.monotonic() - start
+        error = stall_error(stalls, config.stall_timeout)
+        _log(f"[{change.slug}] {console.color('red', 'STALLED')} "
+             f"({error}), see {log_path}")
+        return ReviewResult(
+            change, STATUS_STALLED, mode=config.mode, duration=duration,
+            log_path=log_path, model=detect_model(log_path, config.model),
+            tokens=live_token_count(log_path), error=error)
     except subprocess.TimeoutExpired:
         duration = time.monotonic() - start
         _log(f"[{change.slug}] {console.color('red', 'TIMEOUT')} "
@@ -1180,6 +1378,7 @@ def record_telemetry(config: BatchConfig, result: ReviewResult):
                                 "--short=12", "HEAD"),
         "status": result.status, "findings": result.findings,
         "duration_s": round(result.duration, 1),
+        "stalls": len(result.stalls),
     }
     try:
         summary = write_telemetry(
@@ -1365,6 +1564,7 @@ def update_summary(results_dir: Path, results: list[ReviewResult],
                 "log": result.log_path.name if result.log_path else None,
                 "telemetry": result.telemetry,
                 "error": result.error,
+                "stalls": result.stalls or None,
                 "posted": False,
                 "reviewed_at": datetime.now(timezone.utc).isoformat(
                     timespec="seconds"),

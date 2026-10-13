@@ -25,6 +25,12 @@ lreview run --repo <tree> --last 2 -o /tmp/lreview1.txt
 - Local results are never posted: `--post` on a `--last`, `--local` or
   HEAD review only prints a note. Posting is for Gerrit change numbers and
   GitHub PRs (below).
+- A review whose agent writes nothing for 10 minutes is killed and run
+  once more; if it stalls again it ends `stalled`, with an error naming
+  what it waited on (the model, or the command or tool call that never
+  returned). Do not kill a quiet review by hand; rerun a `stalled` one
+  if it matters. Raise `--stall-timeout SECS` only when the review has to
+  run something slow, such as a build.
 - Per-review timeout defaults to 7200s. Run it in the background with
   output redirected to a file, using the harness's own mechanism: Claude
   Code's `run_in_background`, or whatever the run's instructions specify.

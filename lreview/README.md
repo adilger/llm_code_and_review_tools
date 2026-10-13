@@ -160,7 +160,8 @@ is redrawn in place every few seconds — elapsed time and a **live token
 counter** per running review (billed usage summed live from the
 stream-json events, tracking the final total to ~1%; also your
 liveness signal — a frozen counter means
-a stuck review). Event lines scroll above it; completions show final
+a stuck review, and a review whose log has not grown for two minutes
+shows `quiet <time>`). Event lines scroll above it; completions show final
 tokens and cost from the result event, and the batch summary prints
 per-change and total tokens/cost:
 
@@ -359,7 +360,14 @@ lreview bench report --judge DIR...                  # LLM-judged matching
    `kreview-<change>_ps<N>-<timestamp>.<pid>.log` — every run's log
    is preserved (they are the ground truth for comparing runs;
    `summary.json` names the log of the current entry); on timeout the
-   whole agent process group is killed, and Ctrl+C kills every running review the same way — the agents run in their own sessions, so without that an interrupted batch would leave them running (and billing) headless.
+   whole agent process group is killed. A review whose log stops
+   growing for `--stall-timeout` seconds (default 600) is killed the
+   same way and started once more (`--no-stall-retry` to not); its
+   stalled log is kept as `kreview-*.stalled.jsonl`. If the retry
+   stalls too, the review is `stalled`, and its error says how long it
+   was silent and what it was waiting on: the agent's first output, a
+   tool call that never answered (a codex command or a claude tool use,
+   named), or the model itself when no tool call was running. Ctrl+C kills every running review the same way — the agents run in their own sessions, so without that an interrupted batch would leave them running (and billing) headless.
 4. The prompt writes `./gerrit-review.json` **only when it finds issues**,
    and `./review-metadata.json` (severity score) for **every completed
    analysis** — the metadata file is the completion marker, so a run
@@ -373,9 +381,12 @@ lreview bench report --judge DIR...                  # LLM-judged matching
    (`--keep-worktrees` to keep them). One crashed or malformed review
    never aborts the rest of the batch.
 5. `summary.json` in the results dir records per change: patchset, SHA,
-   status (`findings` / `clean` / `failed` / `timeout` /
-   `invalid-json`), finding count, severity, model, tokens, cost, and
-   whether it was posted.
+   status (`findings` / `clean` / `failed` / `timeout` / `stalled` /
+   `invalid-json`), the error of any status but the first two, finding
+   count, severity, model, tokens, cost, and whether it was posted.
+   `stalls` lists every attempt that stalled, a retried one included:
+   `waiting_on` (`start`, `tool` or `model`), `detail`, `silent_s`,
+   and the kept `log`.
    All manifest access is flock-protected and written atomically, so a
    `post` of earlier results can safely overlap a running batch.
 6. Posting (`--post` or the `post` subcommand) goes through gerrit-cli's
@@ -698,6 +709,8 @@ opencode's `--model` wants the `provider/model` form.
 | `--output, -o FILE` | — | Plain-text dump of every review in the batch (default with `--last`: `<results-dir>/review-last<N>.txt`) |
 | `--jobs, -j N` | 5 | Parallel reviews |
 | `--timeout SECS` | 7200 | Per-review timeout |
+| `--stall-timeout SECS` | `$LREVIEW_STALL_TIMEOUT`, else 600 | End a review whose agent writes nothing for SECS (0: never), naming what it was waiting on. The longest real silence in 228 reviews was under four minutes |
+| `--[no-]stall-retry` | on | Start a stalled review once more before reporting it `stalled` |
 | `--results-dir DIR` | `$LREVIEW_RESULTS_DIR`, else `lreview-results/` in the llm tools checkout (cwd-relative without a checkout) | Logs, JSONs, summary.json |
 | `--worktrees-dir DIR` | auto | Where worktrees are created |
 | `--keep-worktrees` | off | Keep worktrees after review |

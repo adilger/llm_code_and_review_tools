@@ -22,6 +22,7 @@ from lreview.runner import (
     STATUS_FAILED,
     STATUS_FINDINGS,
     STATUS_INVALID_JSON,
+    STATUS_STALLED,
     STATUS_TIMEOUT,
     build_agent_cmd,
     count_findings,
@@ -56,6 +57,15 @@ if [ -f REFUSED_MARKER ]; then
     exit 1
 fi
 if [ -f SLEEP_MARKER ]; then sleep 30; exit 0; fi
+if [ -f STALL_MARKER ] && [ ! -e "$STUB_STALL_FLAG" ]; then
+    [ -n "$STUB_STALL_ONCE" ] && touch "$STUB_STALL_FLAG"
+    echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"make -j8"}}]}}'
+    echo '{"partial":"review"}' > review-metadata.json
+    sleep 30; exit 0
+fi
+if [ -f TRICKLE_MARKER ]; then
+    for i in 1 2 3 4 5 6 7 8; do echo '{"type":"system","subtype":"thinking_tokens"}'; sleep 0.25; done
+fi
 if [ -f NO_METADATA_MARKER ]; then echo "bailed early"; exit 0; fi
 if [ -f LATE_METADATA_MARKER ]; then
     case " $* " in *" --resume "*) ;; *) echo "forgot it"; exit 0;; esac
@@ -774,6 +784,81 @@ class TestRunBatch:
         assert results[0].status == STATUS_TIMEOUT
         assert not any((tmp_path / "worktrees").glob("kreview_*"))
 
+    def test_silent_review_stalls_and_says_on_what(self, repo, tmp_path,
+                                                   stub_claude, monkeypatch):
+        """A review whose agent goes quiet ends as stalled, long before
+        its timeout, naming the tool call it was waiting on; the one
+        retry stalls the same way."""
+        import time as time_mod
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        monkeypatch.setenv("STUB_STALL_FLAG", str(tmp_path / "stalled"))
+        sha = _commit_with_marker(repo, "STALL_MARKER")
+        config = _config(repo, tmp_path, stall_timeout=1)
+        start = time_mod.monotonic()
+        result, = run_batch(config, [_change(202, sha)])
+        assert time_mod.monotonic() - start < 20
+        assert result.status == STATUS_STALLED
+        assert len(_invocations(args_log)) == 2
+        assert result.error.startswith("no output for 1s (--stall-timeout 1)"
+                                       ", waiting on a tool call: tool Bash:"
+                                       " make -j8")
+        assert "first attempt stalled too" in result.error
+        assert [s["waiting_on"] for s in result.stalls] == ["tool", "tool"]
+        kept = config.results_dir / result.stalls[0]["log"]
+        assert kept.name.endswith(".stalled.jsonl")
+        assert "make -j8" in kept.read_text()
+        entry = json.loads(
+            (config.results_dir / "summary.json").read_text())["202"]
+        assert entry["status"] == STATUS_STALLED
+        assert entry["error"] == result.error
+        assert entry["stalls"][1]["detail"] == "tool Bash: make -j8"
+        assert not any((tmp_path / "worktrees").glob("kreview_*"))
+
+    def test_a_stall_is_retried_once(self, repo, tmp_path, stub_claude,
+                                     monkeypatch):
+        """The retry starts clean: the stalled attempt's partial
+        review-metadata.json is not taken as the review's."""
+        monkeypatch.setenv("STUB_STALL_FLAG", str(tmp_path / "stalled"))
+        monkeypatch.setenv("STUB_STALL_ONCE", "1")
+        sha = _commit_with_marker(repo, "STALL_MARKER")
+        config = _config(repo, tmp_path, stall_timeout=1)
+        result, = run_batch(config, [_change(203, sha)])
+        assert result.status == STATUS_CLEAN
+        assert len(result.stalls) == 1
+        assert result.stalls[0]["waiting_on"] == "tool"
+        assert result.log_path.name.endswith(".log")
+        assert "estimated_tokens" in result.log_path.read_text()
+        saved = json.loads((config.results_dir /
+                            "review-metadata-203_ps1.json").read_text())
+        assert "partial" not in saved
+        entry = json.loads(
+            (config.results_dir / "summary.json").read_text())["203"]
+        assert entry["stalls"][0]["log"].endswith(".stalled.jsonl")
+
+    def test_no_stall_retry(self, repo, tmp_path, stub_claude, monkeypatch):
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        monkeypatch.setenv("STUB_STALL_FLAG", str(tmp_path / "stalled"))
+        monkeypatch.setenv("STUB_STALL_ONCE", "1")
+        sha = _commit_with_marker(repo, "STALL_MARKER")
+        config = _config(repo, tmp_path, stall_timeout=1, stall_retry=False)
+        result, = run_batch(config, [_change(204, sha)])
+        assert result.status == STATUS_STALLED
+        assert len(_invocations(args_log)) == 1
+        assert "first attempt" not in result.error
+
+    def test_steady_output_is_not_a_stall(self, repo, tmp_path,
+                                          stub_claude):
+        """Only silence counts: a review that keeps writing runs past
+        the stall limit."""
+        sha = _commit_with_marker(repo, "TRICKLE_MARKER")
+        config = _config(repo, tmp_path, stall_timeout=1)
+        result, = run_batch(config, [_change(205, sha)])
+        assert result.status == STATUS_CLEAN
+        assert result.duration > 1.5
+        assert result.stalls == []
+
     def test_keep_worktrees(self, repo, tmp_path, stub_claude):
         sha = _git(repo, "rev-parse", "HEAD")
         config = _config(repo, tmp_path, keep_worktrees=True)
@@ -1374,3 +1459,64 @@ def test_agent_error_none_for_a_plain_failure(tmp_path):
     log.write_text('{"type":"result","is_error":false,"result":"ok"}\nboom\n')
     assert agent_error(log) is None
     assert agent_error(tmp_path / "missing.log") is None
+
+
+def test_codex_that_goes_silent_is_stalled_on_the_model(repo, tmp_path,
+                                                        monkeypatch):
+    """The 2026-10-12 hang: codex printed a message, ran no command,
+    and then wrote nothing more."""
+    from lreview.runner import run_review
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_text(
+        "#!/bin/sh\n"
+        "echo '{\"type\":\"thread.started\",\"thread_id\":\"t\"}'\n"
+        "echo '{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\","
+        "\"type\":\"command_execution\",\"command\":\"rg x\"}}'\n"
+        "echo '{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\","
+        "\"type\":\"command_execution\",\"command\":\"rg x\"}}'\n"
+        "echo '{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\","
+        "\"type\":\"agent_message\",\"text\":\"checking JIRA\"}}'\n"
+        "exec sleep 30\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    sha = _git(repo, "rev-parse", "HEAD")
+    config = _config(repo, tmp_path, agent="codex", stall_timeout=1,
+                     stall_retry=False)
+    config.results_dir.mkdir(parents=True)
+    result = run_review(config, _change(2, sha), repo)
+    assert result.status == STATUS_STALLED
+    assert result.stalls[0]["waiting_on"] == "model"
+    assert result.error.endswith(
+        "waiting on the model: no tool call was running; the last event "
+        "was item.completed agent_message")
+
+
+def test_stall_point(tmp_path):
+    from lreview.runner import stall_point
+    log = tmp_path / "kreview.log"
+    log.write_text("")
+    assert stall_point(log)["waiting_on"] == "start"
+    log.write_text("\n".join([
+        '{"type":"thread.started","thread_id":"t"}',
+        json.dumps({"type": "item.started", "item": {
+            "id": "item_3", "type": "command_execution",
+            "command": "/bin/bash -lc 'make  -j8'"}}),
+    ]) + "\n")
+    assert stall_point(log) == {
+        "waiting_on": "tool",
+        "detail": "command /bin/bash -lc 'make -j8'"}
+    log.write_text("\n".join([
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "a", "name": "Grep",
+             "input": {"pattern": "foo"}}]}}),
+        json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "a"}]}}),
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "thinking it over"}]}}),
+    ]) + "\n")
+    assert stall_point(log) == {
+        "waiting_on": "model",
+        "detail": "no tool call was running; the last event was "
+                  "assistant text"}

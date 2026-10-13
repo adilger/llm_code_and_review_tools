@@ -25,6 +25,7 @@ from . import __version__
 from .gerrit import resolve_change
 from .poster import post_results
 from .runner import (
+    DEFAULT_STALL_TIMEOUT,
     BatchConfig,
     STATUS_CLEAN,
     STATUS_FINDINGS,
@@ -39,6 +40,22 @@ def _positive_int(value: str) -> int:
     if number < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
     return number
+
+
+def _seconds(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return number
+
+
+def default_stall_timeout() -> int:
+    """$LREVIEW_STALL_TIMEOUT when it is a number of seconds, else
+    the built-in default."""
+    try:
+        return _seconds(os.environ.get("LREVIEW_STALL_TIMEOUT", ""))
+    except (ValueError, argparse.ArgumentTypeError):
+        return DEFAULT_STALL_TIMEOUT
 
 
 def _env_flag(name: str, default: bool = True) -> bool:
@@ -565,7 +582,9 @@ def cmd_run(args) -> int:
         return 1
 
     print(f"\nReviewing {len(changes)} change(s), "
-          f"{args.jobs} in parallel, timeout {args.timeout}s each")
+          f"{args.jobs} in parallel, timeout {args.timeout}s each, "
+          + (f"stalled after {args.stall_timeout}s without output"
+             if args.stall_timeout else "no stall limit"))
     print(f"  prompts:   {prompts_dir}")
     print(f"             (via {prompts_status.source})")
     print(f"  results:   {results_dir}")
@@ -589,6 +608,8 @@ def cmd_run(args) -> int:
         prompts_dir=prompts_dir,
         jobs=args.jobs,
         timeout=args.timeout,
+        stall_timeout=args.stall_timeout,
+        stall_retry=args.stall_retry,
         keep_worktrees=args.keep_worktrees,
         mode=args.mode,
         agent=args.agent,
@@ -782,7 +803,8 @@ def cmd_bench(args) -> int:
             repo=repo, results_dir=results_dir,
             worktrees_dir=bench_dir / "worktrees",
             prompts_dir=prompts_status.prompts_dir, jobs=1,
-            timeout=args.timeout, mode=args.mode, agent=args.agent,
+            timeout=args.timeout, stall_timeout=args.stall_timeout,
+            stall_retry=args.stall_retry, mode=args.mode, agent=args.agent,
             model=model, effort=args.effort,
             memory_db=(label_dir / "db") if args.memory else None,
             resume=args.resume, lean=args.lean, preload=args.preload,
@@ -921,6 +943,21 @@ def cmd_post(args) -> int:
     return 1 if errors else 0
 
 
+def _add_stall_options(parser) -> None:
+    parser.add_argument(
+        "--stall-timeout", type=_seconds, default=default_stall_timeout(),
+        metavar="SECS",
+        help="End a review as stalled when its agent writes nothing for "
+             "SECS seconds, naming what it was waiting on; 0 never does "
+             "(default: $LREVIEW_STALL_TIMEOUT, else "
+             f"{DEFAULT_STALL_TIMEOUT})")
+    parser.add_argument(
+        "--stall-retry", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Start a stalled review once more before reporting it "
+             "stalled (default: on)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lreview",
@@ -940,6 +977,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  --prefix TEXT    posted-message prefix; <model> placeholder\n"
             "                   (default: '[AI review - <model>]')\n"
             "  --timeout SECS   per-review limit (default: 7200)\n"
+            "  --stall-timeout SECS  end a review whose agent writes\n"
+            "                   nothing for SECS, and run it once more\n"
+            f"                   (default: {DEFAULT_STALL_TIMEOUT})\n"
             "\n"
             "  --last N         review the newest N commits of --repo\n"
             "  --since REV      review only what changed from REV, an\n"
@@ -1054,6 +1094,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--timeout", type=int, default=7200,
         help="Per-review timeout in seconds (default: 7200)")
+    _add_stall_options(run_p)
     run_p.add_argument(
         "--results-dir", default=default_results_dir(),
         help="Where logs, review JSONs, and summary.json go "
@@ -1185,6 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
              "(fast); else they come from Gerrit")
     bench_run.add_argument("--jobs", "-j", type=_positive_int, default=4)
     bench_run.add_argument("--timeout", type=int, default=7200)
+    _add_stall_options(bench_run)
     bench_run.add_argument("--agent", choices=sorted(AGENTS),
                            default=default_agent)
     bench_run.add_argument("--model", default=None)
