@@ -1377,8 +1377,8 @@ def add_message_parser(subparsers):
         description="Post a top-level review message (not a file comment) "
                     "on a Gerrit change: a change message, as a vote's message "
                     "is. The web UI's reply box makes a patchset-level comment "
-                    "instead, which is what Patch Watcher reads for tags, so a "
-                    "tag of the bot in this message is not seen.",
+                    "instead. Patch Watcher reads a tag in either, and answers "
+                    "one in a change message with a new patchset-level comment.",
     )
     parser.add_argument("url", help="Gerrit change URL, number or Change-Id")
     parser.add_argument("text", help="Message text to post")
