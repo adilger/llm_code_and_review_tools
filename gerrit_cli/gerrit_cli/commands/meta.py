@@ -159,6 +159,12 @@ and HEAD is new to Gerrit, it refuses and lists them.
 Change-Id names (updating it, or creating it). Every commit needs a
 Change-Id, and CHANGE, if given, must be one of them rather than HEAD.
 
+Two commits between the branch and HEAD with one Change-Id are refused
+(DUPLICATE_CHANGE_ID): Gerrit would reject the push as "same Change-Id
+in multiple changes". It usually means a commit was made on top of an
+earlier patchset instead of amending it; the message gives the command
+that squashes them.
+
 A commit whose committer email is not registered to the account is
 rewritten so the committer is the account's name and preferred email --
 and so is every commit above it, since its parent changes. Author, tree

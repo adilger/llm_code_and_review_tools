@@ -903,13 +903,9 @@ def _amend_hint(
     """A hint for a range holding a commit made where an amend was meant.
 
     Such a commit sits on top of the one it should have replaced, and
-    carries no Change-Id, a new one, or that commit's own.
+    carries no Change-Id or a new one.
     """
     in_range = {c.sha for c in commits}
-    owners: dict[str, Commit] = {}
-    for c in commits:
-        if c.change_ids:
-            owners.setdefault(c.change_ids[-1], c)
     creates = {e["sha"] for e in plan or [] if e.get("action") == "create"}
     suspects = []
     for c in new:
@@ -919,10 +915,6 @@ def _amend_hint(
         cid = c.change_ids[-1] if c.change_ids else None
         if cid is None:
             suspects.append(f"{what} has no Change-Id")
-        elif owners[cid].sha != c.sha:
-            suspects.append(
-                f"{what} repeats the Change-Id of {owners[cid].sha[:12]}"
-            )
         elif c is commits[-1] and c.sha in creates:
             suspects.append(f"{what} would open a new change")
     if not series and len(new) > 1:
@@ -935,6 +927,84 @@ def _amend_hint(
         f" Hint: HEAD has {len(commits)} commit(s) over {branch} "
         f"({tip[:12]}); " + "; ".join(suspects)
         + ". Did you mean `git commit --amend`?"
+    )
+
+
+def _check_duplicate_change_ids(
+    commits: list[Commit],
+    known: set[str],
+    named: Target | None,
+    branch: str,
+    tip: str,
+) -> None:
+    """Refuse a range in which two commits carry one Change-Id.
+
+    Gerrit rejects the whole push ("same Change-Id in multiple changes").
+    The usual cause is a commit made on top of an earlier patchset of
+    its own change instead of amending it.
+    """
+    by_cid: dict[str, list[Commit]] = {}
+    for c in commits:
+        if c.change_ids:
+            by_cid.setdefault(c.change_ids[-1], []).append(c)
+    groups = {cid: cs for cid, cs in by_cid.items() if len(cs) > 1}
+    if not groups:
+        return
+
+    revisions = named.revisions if named else {}
+
+    def describe(c: Commit) -> str:
+        what = f"{c.sha[:12]} '{c.subject}'"
+        patchset = (revisions.get(c.sha) or {}).get("_number")
+        if patchset is not None:
+            return (f"{what} (patchset {patchset} of change "
+                    f"{named.change_number})")
+        if c.sha in known:
+            return f"{what} (already on Gerrit)"
+        return what
+
+    parts = [
+        f"Change-Id {cid} is on {len(cs)} commits: "
+        + ", ".join(describe(c) for c in cs)
+        for cid, cs in groups.items()
+    ]
+    if len(groups) == 1:
+        cs = next(iter(groups.values()))
+        top = commits[-len(cs):]
+        if [c.sha for c in top] == [c.sha for c in cs]:
+            how = (
+                f"`git reset --soft HEAD~{len(cs) - 1} && git commit "
+                f"--amend -C {cs[-1].sha[:12]}` folds them into one "
+                "commit with the newest one's message"
+            )
+        else:
+            how = (
+                f"`git rebase -i {tip[:12]}` and mark the later ones "
+                "fixup or squash"
+            )
+    else:
+        how = (
+            f"`git rebase -i {tip[:12]}` and mark the later commit of "
+            "each pair fixup or squash"
+        )
+    raise UploadError(
+        ErrorCode.DUPLICATE_CHANGE_ID,
+        f"Refusing to upload: between {branch} ({tip[:12]}) and HEAD, "
+        + "; ".join(parts)
+        + ". Gerrit rejects such a push with \"same Change-Id in multiple "
+        "changes\". Usually a new commit was made on top of an earlier "
+        "patchset of the same change instead of amending it. Squash the "
+        f"commits sharing a Change-Id into one: {how}. Then upload "
+        "again. Nothing was pushed.",
+        details={"duplicates": [
+            {"change_id": cid, "commits": [
+                {"sha": c.sha, "subject": c.subject,
+                 "patchset": (revisions.get(c.sha) or {}).get("_number"),
+                 "on_gerrit": c.sha in known}
+                for c in cs
+            ]}
+            for cid, cs in groups.items()
+        ]},
     )
 
 
@@ -1188,19 +1258,34 @@ def _push_failure(
         line for line in remote
         if line.lower().startswith(("error", "fatal"))
     ]
+    hint = ""
+    if "same change-id in multiple changes" in " ".join(
+        [status[1], *remote]
+    ).lower():
+        hint = (
+            "Hint: two commits in the pushed range carry the same "
+            "Change-Id. Usually a new commit was made on top of an "
+            "earlier patchset of the same change instead of amending it; "
+            "squash them into one commit and upload again. This is not a "
+            "duplicate change on the server."
+        )
+    details = {
+        "rejection": status[1],
+        "remote_messages": remote,
+        "committer_amended": amended,
+        "sha": sha,
+    }
+    if hint:
+        details["hint"] = hint
     return UploadError(
         ErrorCode.PUSH_REJECTED,
         f"Gerrit rejected the push: {status[1]}"
         + (f" -- {' '.join(errors)}" if errors else "")
         + (f". HEAD had already been rewritten to {sha[:12]} to fix the "
            "committer; see details.committer_amended."
-           if amended else ""),
-        details={
-            "rejection": status[1],
-            "remote_messages": remote,
-            "committer_amended": amended,
-            "sha": sha,
-        },
+           if amended else "")
+        + (f" {hint}" if hint else ""),
+        details=details,
     )
 
 
@@ -1304,6 +1389,8 @@ def upload(
                 f"Every commit between {branch} and HEAD {head.sha[:12]} "
                 "is already on Gerrit; there is nothing new to upload.",
             )
+
+        _check_duplicate_change_ids(commits, known, named, branch, tip)
 
         plan = None
         try:

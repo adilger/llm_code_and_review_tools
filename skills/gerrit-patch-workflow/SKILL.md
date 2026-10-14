@@ -272,9 +272,14 @@ is not the working directory.
   Change-Id names, so one carrying another change's Change-Id would update
   that change. Read the `--dry-run` plan -- one line per commit and the
   change it would `update` or `create` -- before a series push.
+- A new patchset is an amend of the old one, never a commit on top of
+  it. Two commits with one Change-Id between the branch and HEAD are
+  refused as `DUPLICATE_CHANGE_ID` (Gerrit's own word for it is "same
+  Change-Id in multiple changes", which is not a duplicate change on the
+  server); squash them as the message says and upload again.
 - The output carries `patchset`, `url` and per-commit `action`
   (`update`, `create`, `none`). A refused push is `PUSH_REJECTED`, with
-  Gerrit's reason in the message.
+  Gerrit's reason in the message and, when the cause is known, a hint.
 
 ## Before pushing
 

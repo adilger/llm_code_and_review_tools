@@ -493,25 +493,75 @@ def test_foreign_signoff_refused_before_anything_is_rewritten(gerrit):
 FOREIGN = ("Someone Else", "else@example.com")
 
 
-def test_a_commit_repeating_its_parents_change_id_hints_at_amend(gerrit):
+def test_a_commit_on_an_earlier_patchset_of_its_change_is_refused(gerrit):
     fake, bare, work = gerrit
     patchset = commit(work, "LU-1 llite: the change", cid=CID_A,
                       committer=BOT)
     fake.add_change(51164, CID_A, revisions={patchset: 2})
     head = commit(work, "LU-1 llite: the change v2", cid=CID_A,
-                  committer=BOT, signoff=FOREIGN)
+                  committer=BOT)
 
     with pytest.raises(UploadError) as err:
-        upload(fake, repo=str(work), change="51164", dry_run=True)
+        upload(fake, repo=str(work), change="51164", expect_patchset=2)
 
     e = err.value
-    assert e.code == ErrorCode.NO_SIGNOFF
-    assert "HEAD has 2 commit(s) over master" in e.message
-    assert (f"{head[:12]} 'LU-1 llite: the change v2' repeats the "
-            f"Change-Id of {patchset[:12]}") in e.message
-    assert "`git commit --amend`" in e.message
-    assert e.details["hint"] in e.message
-    assert "--amend" in str(e)
+    assert e.code == ErrorCode.DUPLICATE_CHANGE_ID
+    assert e.exit_code == ExitCode.GENERAL_ERROR
+    assert (f"Change-Id {CID_A} is on 2 commits: {patchset[:12]} "
+            "'LU-1 llite: the change' (patchset 2 of change 51164), "
+            f"{head[:12]} 'LU-1 llite: the change v2'") in e.message
+    assert "same Change-Id in multiple changes" in e.message
+    assert (f"`git reset --soft HEAD~1 && git commit --amend -C "
+            f"{head[:12]}`") in e.message
+    assert e.details["duplicates"] == [{"change_id": CID_A, "commits": [
+        {"sha": patchset, "subject": "LU-1 llite: the change",
+         "patchset": 2, "on_gerrit": True},
+        {"sha": head, "subject": "LU-1 llite: the change v2",
+         "patchset": None, "on_gerrit": False},
+    ]}]
+    assert pushed_refs(bare) == {}
+
+
+def test_the_suggested_squash_makes_the_upload_go_through(gerrit):
+    fake, bare, work = gerrit
+    patchset = commit(work, "LU-1 llite: the change", cid=CID_A,
+                      committer=BOT)
+    fake.add_change(51164, CID_A, revisions={patchset: 2})
+    commit(work, "LU-1 llite: the change v2", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164")
+    command = re.search(r"`(git reset[^`]*)`", err.value.message).group(1)
+    env = dict(os.environ, GIT_COMMITTER_NAME=BOT[0],
+               GIT_COMMITTER_EMAIL=BOT[1])
+    subprocess.run(command, shell=True, cwd=work, check=True, env=env)
+
+    data = upload(fake, repo=str(work), change="51164")
+
+    assert data["pushed"] is True
+    assert data["patchset"] == 3
+    assert git(work, "rev-parse", "HEAD~1") == git(work, "rev-parse",
+                                                   "origin/master")
+    assert git(work, "log", "-1", "--format=%s") == (
+        "LU-1 llite: the change v2"
+    )
+
+
+def test_a_series_with_a_change_id_twice_is_refused(gerrit):
+    fake, bare, work = gerrit
+    first = commit(work, "LU-1 llite: the change", cid=CID_A, committer=BOT)
+    commit(work, "LU-2 osc: other", cid=CID_B, committer=BOT)
+    again = commit(work, "LU-1 llite: fixup", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), series=True)
+
+    e = err.value
+    assert e.code == ErrorCode.DUPLICATE_CHANGE_ID
+    assert first[:12] in e.message and again[:12] in e.message
+    assert "(patchset" not in e.message
+    assert "`git rebase -i " in e.message
+    assert pushed_refs(bare) == {}
 
 
 def test_a_series_commit_opening_a_new_change_hints_at_amend(gerrit):
@@ -863,6 +913,39 @@ def test_a_rejected_push_carries_gerrits_message(gerrit):
     assert "missing subsystem in subject" in e.message
     assert e.details["rejection"].startswith("[remote rejected]")
     assert any("missing subsystem" in m for m in e.details["remote_messages"])
+
+
+def test_a_same_change_id_rejection_explains_the_usual_cause(gerrit):
+    fake, bare, work = gerrit
+    hook = Path(bare) / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "echo 'error: same Change-Id in multiple changes.' >&2\n"
+        "exit 1\n"
+    )
+    hook.chmod(0o755)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164")
+
+    e = err.value
+    assert e.code == ErrorCode.PUSH_REJECTED
+    assert "earlier patchset of the same change" in e.details["hint"]
+    assert e.message.endswith(e.details["hint"])
+
+
+def test_other_rejections_carry_no_change_id_hint(gerrit):
+    fake, bare, work = gerrit
+    hook = Path(bare) / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'error: no' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164")
+
+    assert "hint" not in err.value.details
 
 
 def test_a_url_rewrite_that_would_bypass_https_is_refused(

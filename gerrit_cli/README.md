@@ -127,8 +127,15 @@ gc --user patrickbot upload 12345 --repo /path/to/checkout
   than HEAD. Commits Gerrit already has are not uploaded again.
   When a refusal's range holds a commit that looks made where an amend
   was meant -- one sitting on the commit it should have replaced, with
-  no Change-Id, a new one or that commit's own -- the error ends with a
-  hint asking whether `git commit --amend` was meant.
+  no Change-Id or a new one -- the error ends with a hint asking whether
+  `git commit --amend` was meant.
+- **One Change-Id, one commit.** Two commits in the range with the same
+  Change-Id (most often a commit made on top of a patchset of its own
+  change instead of amending it) are refused as `DUPLICATE_CHANGE_ID`
+  before anything is pushed, since Gerrit would reject the whole push
+  with "same Change-Id in multiple changes". The message names the
+  commits, says which patchset each one is, and gives the command that
+  squashes them.
 - **Committer.** Gerrit refuses a committer email that is not registered
   to the pushing account unless it has "forge committer". The account's
   emails are read from `/accounts/self/emails`; a commit whose committer
@@ -149,7 +156,9 @@ has it), `change_number` and `patchset`; `committer_amended[]`;
 `remote_messages` (Gerrit's `remote:` lines) and `warnings` (for
 example, uncommitted changes that were not uploaded). A rejected push
 exits 1 with code `PUSH_REJECTED`, Gerrit's reason in the message and
-its remote output in `details`.
+its remote output in `details`; for a rejection whose cause is known
+(such as "same Change-Id in multiple changes") `details.hint` says what
+to do, and the message ends with it.
 
 `GERRIT_PUSH_URL` replaces `$GERRIT_URL/a` as the base the project is
 appended to -- for a Gerrit whose git endpoint lives elsewhere, or a
