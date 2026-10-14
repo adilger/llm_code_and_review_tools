@@ -302,10 +302,11 @@ changes are not in it.
 A host may hold more than one Gerrit login -- a personal account and a
 bot, say -- as `[alias]` sections in the same `.env`. `gerrit --user
 <alias-or-username> ...` picks one, before or after the subcommand.
-Without `--user` the default set is used, which is the one to leave
-alone unless the task names an account. `./install.sh --status` lists
-the sets a host actually has; do not guess an alias, since a wrong one
-is an error rather than a fallback.
+Every subcommand takes it, reads included, so a run that writes as the
+bot can pass it on every call. Without `--user` the default set is
+used, which is the one to leave alone unless the task names an account.
+`./install.sh --status` lists the sets a host actually has; do not
+guess an alias, since a wrong one is an error rather than a fallback.
 
 `GERRIT_CLI_ENV_FILE`, when set, makes `gerrit` read that one file
 instead -- a harness uses it to hand an agent the bot's credentials.

@@ -103,6 +103,61 @@ def test_user_is_hoisted_from_after_the_subcommand(tmp_path):
     assert got["argv"][1:3] == ["--user", "exa"]
 
 
+def test_a_read_takes_user_after_its_own_options(tmp_path):
+    """`gerrit comments --all 68474 --user patrickbot`, as an agent ran it."""
+    env_file = write_env(tmp_path, TWO_SETS_ENV)
+    code = (
+        "import sys, json\n"
+        "sys.argv = ['gc', 'comments', '--all', '68474', '--user', 'exa']\n"
+        "import gerrit_cli.cli as cli\n"
+        "args = cli.build_parser().parse_args()\n"
+        "print(json.dumps({'command': args.command, 'all': args.all,\n"
+        "                  'url': args.url, 'user': args.user}))\n"
+    )
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GERRIT_URL", "GERRIT_USER", "GERRIT_PASS")}
+    env["GERRIT_CLI_ENV_FILE"] = str(env_file)
+    result = subprocess.run([sys.executable, "-c", code],
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    import json
+
+    assert json.loads(result.stdout) == {
+        "command": "comments", "all": True, "url": "68474", "user": "exa",
+    }
+
+
+def test_every_subcommand_help_lists_the_global_options():
+    import argparse
+
+    from gerrit_cli.cli import build_parser
+
+    parser = build_parser()
+    pending = [parser]
+    checked = 0
+    while pending:
+        p = pending.pop()
+        for action in p._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for name, sub in action.choices.items():
+                    text = sub.format_help()
+                    assert "--user SET" in text, name
+                    assert "--envelope" in text, name
+                    checked += 1
+                    pending.append(sub)
+    assert checked > 40
+
+
+def test_a_subcommands_user_option_keeps_the_value_given():
+    from gerrit_cli.cli import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(["comments", "1", "-U", "bot"]).user == "bot"
+    assert parser.parse_args(["--user", "bot", "comments", "1"]).user == "bot"
+    args = parser.parse_args(["comments", "1"])
+    assert args.user is None and args.envelope is False
+
+
 def test_user_matches_a_username_too(tmp_path):
     env_file = write_env(tmp_path, TWO_SETS_ENV)
     result = run_probe(env_file, ["gc", "--user", "pfarrell-exa", "info", "1"])

@@ -445,7 +445,47 @@ def build_parser() -> argparse.ArgumentParser:
     handlers = build_handlers()
 
     setup_parsers(subparsers, handlers)
+    _list_global_options(subparsers)
     return parser
+
+
+def _list_global_options(subparsers: argparse._SubParsersAction) -> None:
+    """Show --user and --envelope in every subcommand's --help.
+
+    _preselect_credential_set moves both in front of the subcommand, so
+    a subcommand accepts them anywhere; without this its own --help does
+    not list them, and reads as if it refused them.
+    """
+    seen: set[int] = set()
+    pending = [subparsers]
+    while pending:
+        subs = pending.pop()
+        for sub in subs.choices.values():
+            if id(sub) in seen:
+                continue
+            seen.add(id(sub))
+            group = sub.add_argument_group(
+                "global options (accepted before or after the command)"
+            )
+            for option in (
+                group.add_argument(
+                    "--user", "-U", default=argparse.SUPPRESS,
+                    metavar="SET",
+                    help="Credential set to use, as for 'gerrit --user'. "
+                         "Every command takes it, reads included.",
+                ),
+                group.add_argument(
+                    "--envelope", action="store_true",
+                    default=argparse.SUPPRESS,
+                    help="Include full response envelope (ok/data/meta "
+                         "wrapper)",
+                ),
+            ):
+                option.global_option = True
+            pending.extend(
+                a for a in sub._actions
+                if isinstance(a, argparse._SubParsersAction)
+            )
 
 
 def main():

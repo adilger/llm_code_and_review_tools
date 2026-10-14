@@ -62,10 +62,20 @@ def _argument_from_action(action: argparse.Action) -> Argument:
     )
 
 
+def _own_action(action: argparse.Action) -> bool:
+    """Not --help, nor the global options every subparser lists."""
+    if isinstance(action, argparse._HelpAction):
+        return False
+    return not getattr(action, "global_option", False)
+
+
 def command_from_parser(name: str, sub: argparse.ArgumentParser, summary: str = "") -> Command:
     """A Command built from a subparser, for commands the table below lacks."""
     sub.prog = f"gc {name}"
-    usage = " ".join(sub.format_usage().split())
+    formatter = sub._get_formatter()
+    formatter.add_usage(sub.usage, [a for a in sub._actions if _own_action(a)],
+                        sub._mutually_exclusive_groups)
+    usage = " ".join(formatter.format_help().split())
     if usage.startswith("usage: "):
         usage = usage[len("usage: "):]
     usage = usage.replace(" [-h]", "")
@@ -74,7 +84,7 @@ def command_from_parser(name: str, sub: argparse.ArgumentParser, summary: str = 
         description=" ".join((sub.description or summary or "").split()),
         usage=usage,
         arguments=[_argument_from_action(a) for a in sub._actions
-                   if not isinstance(a, argparse._HelpAction)],
+                   if _own_action(a)],
     )
 
 
