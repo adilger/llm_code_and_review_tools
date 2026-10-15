@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pw-retest"
+name = "pw-cli"
 version = "0.1.1"
 description = "Ask Patch Watcher for what tagging it on a Gerrit change asks, signed in with a Gerrit login"
 requires-python = ">=3.11"
@@ -18,11 +18,13 @@ dependencies = [
 ]
 
 [project.scripts]
-pw-retest = "pw_retest.cli:main"
+pw-cli = "pw_cli.cli:main"
+# The old name, kept for what still calls it.
+pw-retest = "pw_cli.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pw_retest*"]
+include = ["pw_cli*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

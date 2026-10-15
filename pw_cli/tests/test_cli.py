@@ -1,4 +1,4 @@
-"""pw-retest against a fake Patch Watcher: no network."""
+"""pw-cli against a fake Patch Watcher: no network."""
 
 import json
 from unittest.mock import patch
@@ -7,7 +7,7 @@ import pytest
 import requests
 from click.testing import CliRunner
 
-from pw_retest import cli
+from pw_cli import cli
 
 
 class FakeResponse:

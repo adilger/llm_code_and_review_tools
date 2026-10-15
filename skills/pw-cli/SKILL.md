@@ -1,31 +1,31 @@
 ---
-name: pw-retest
-description: This skill should be used to ask Patch Watcher (the Lustre Gerrit bot, @Patrickbot) for what tagging it on a Gerrit change asks, with the pw-retest CLI and your own Gerrit login - "have the bot retest my patch", "get Patch Watcher to shepherd this change", "watch 12345 at bigfix", "is the bot watching this change", "what level is this change at", "stop the bot on my change", "halt the bot on this patch", "release my halt", "have the bot find reviewers", "run an lreview on this change", "ask the bot to rebase this", "send the bot feedback". Covers what each level does, which changes retest and shepherd refuse, who may do what, and the daily limits.
+name: pw-cli
+description: This skill should be used to ask Patch Watcher (the Lustre Gerrit bot, @Patrickbot) for what tagging it on a Gerrit change asks, with the pw-cli CLI and your own Gerrit login - "have the bot retest my patch", "get Patch Watcher to shepherd this change", "watch 12345 at bigfix", "is the bot watching this change", "what level is this change at", "stop the bot on my change", "halt the bot on this patch", "release my halt", "have the bot find reviewers", "run an lreview on this change", "ask the bot to rebase this", "send the bot feedback". Covers what each level does, which changes retest and shepherd refuse, who may do what, and the daily limits.
 version: 0.2.0
 ---
 
 # Patch Watcher by Gerrit login
 
 Patch Watcher is the bot (`@Patrickbot` on review.whamcloud.com) that
-watches Lustre changes. `pw-retest` asks it, as your Gerrit account, for
+watches Lustre changes. `pw-cli` asks it, as your Gerrit account, for
 what tagging it on a change asks, without writing the comment. The same
 rules decide what you may do as decide what your tags may do. Backlog work
 is not offered here; tag the bot for that.
 
 ```bash
-pw-retest whoami                  # your account, role, and what you may do
-pw-retest status 69157            # watched? at what level? halted, and why?
-pw-retest retest 69157            # watch at retest
-pw-retest shepherd 69157 69158    # watch at shepherd, several at once
-pw-retest watch 69157 --level bigfix   # any level your role allows
-pw-retest stop 69157              # stop watching, and stop its run
-pw-retest halt 69157 owner is reworking this
-pw-retest clear-halt 69157 --note "rework uploaded"
-pw-retest reviewers 69157         # find and add reviewers, once
-pw-retest lreview 69157 [--light] # AI review posted on the patchset
-pw-retest request 69157 rebase this on master and fix the conflict
-pw-retest request 69157 -         # the request from stdin, paragraphs and all
-pw-retest feedback 69157 the bot retested a failure it caused
+pw-cli whoami                  # your account, role, and what you may do
+pw-cli status 69157            # watched? at what level? halted, and why?
+pw-cli retest 69157            # watch at retest
+pw-cli shepherd 69157 69158    # watch at shepherd, several at once
+pw-cli watch 69157 --level bigfix   # any level your role allows
+pw-cli stop 69157              # stop watching, and stop its run
+pw-cli halt 69157 owner is reworking this
+pw-cli clear-halt 69157 --note "rework uploaded"
+pw-cli reviewers 69157         # find and add reviewers, once
+pw-cli lreview 69157 [--light] # AI review posted on the patchset
+pw-cli request 69157 rebase this on master and fix the conflict
+pw-cli request 69157 -         # the request from stdin, paragraphs and all
+pw-cli feedback 69157 the bot retested a failure it caused
 ```
 
 A change is a number or any Gerrit URL for it. Output is JSON on stdout;
@@ -53,7 +53,7 @@ regenerated: fix the `.env`, do not retry in a loop. After five refused
 logins for one name in fifteen minutes the server stops asking Gerrit and
 answers `RATE_LIMITED` until the quarter hour is up.
 
-`PW_RETEST_URL` points it at another Patch Watcher; the default is
+`PW_CLI_URL` points it at another Patch Watcher; the default is
 `https://patchwatcher.mulberrytree.us`. It must be https (or loopback),
 since the Gerrit password goes with every request.
 
@@ -140,5 +140,5 @@ colleague: what to do, on what, and what done looks like.
   change's run and keeps the bot off it until released; `stop` takes it off
   the watch list.
 - For queued, non-urgent work not tied to one change, tag the bot with
-  `watch backlog` on Gerrit or use `pw-watch`; this tool does not queue
+  `watch backlog` on Gerrit or use `pw-admin`; this tool does not queue
   backlog work.

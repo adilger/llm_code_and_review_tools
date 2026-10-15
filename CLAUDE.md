@@ -219,11 +219,11 @@ Also installed from this repo:
   `JANITOR_URL` env var. See the top-level `README.md`.
 - `lustre-crash` — drgn-based crash-dump analysis; no auth.
   See `lustre_crash/README.md`.
-- `pw-retest`: asks Patch Watcher for what tagging it on a change asks
+- `pw-cli`: asks Patch Watcher for what tagging it on a change asks
   (levels, stop, halt, reviewers, lreview, request runs, feedback; not
   backlog), signed in with gerrit-cli's Gerrit login, which its
   `/tagger/v1/` routes check with Gerrit. Its roles decide what each
-  person may do, as for tags. `pw-watch` is the Authelia-login client
+  person may do, as for tags. `pw-admin` is the Authelia-login client
   for everything else.
 
 ## Claude skills
@@ -231,7 +231,7 @@ Also installed from this repo:
 `skills/` holds task-shaped skills for these tools --
 `lustre-ci-triage`, `gerrit-patch-workflow`, `lreview-spin-cycle`,
 `lustre-crash-triage`, `jira-bug-research`, `lustre-debug-logs`,
-`pw-retest`. `./install.sh` links them
+`pw-cli`. `./install.sh` links them
 into `~/.claude/skills`; `--skills` does only that, `--no-skills`
 skips it. They are symlinks, so edits in this checkout take effect
 immediately -- edit the skill here, not the copy in `~/.claude`.

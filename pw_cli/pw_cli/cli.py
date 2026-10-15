@@ -1,4 +1,4 @@
-"""pw-retest: ask Patch Watcher what tagging it on a Gerrit change asks.
+"""pw-cli: ask Patch Watcher what tagging it on a Gerrit change asks.
 
 Patch Watcher's /tagger/v1/ routes take a Gerrit username and HTTP password,
 check them with Gerrit, and then do what tagging the bot on the change would
@@ -30,9 +30,9 @@ from llm_tool_common.config import (
 from llm_tool_common.envelope import format_json, success_response
 from llm_tool_common.errors import ErrorCode, ExitCode, ToolError
 
-TOOL_NAME = "pw-retest"
+TOOL_NAME = "pw-cli"
 DEFAULT_URL = "https://patchwatcher.mulberrytree.us"
-URL_ENV = "PW_RETEST_URL"
+URL_ENV = "PW_CLI_URL"
 TIMEOUT = 60
 
 # A bare number, or a Gerrit URL in any of its usual forms.
@@ -175,7 +175,7 @@ class RetestGroup(JsonErrorGroup):
 
 
 @click.group(cls=RetestGroup)
-@click.version_option(package_name="pw-retest", prog_name="pw-retest")
+@click.version_option(package_name="pw-cli", prog_name="pw-cli")
 @click.option("--envelope", is_flag=True, help="Include full response envelope (ok/data/meta wrapper)")
 @click.option(
     "--user", "-U", default=None,
