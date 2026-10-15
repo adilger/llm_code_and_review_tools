@@ -149,6 +149,24 @@ class TestReviewMarkdown:
         assert "### 3. general *(informational)*" in md
         assert "None" not in md
 
+    def test_identifiers_in_code_spans(self):
+        """Gerrit plain text: underscores in identifiers must not turn
+        into italics, nor <name> into an HTML tag."""
+        spec = {"message": "Looks good; see ll_io_zero_page().",
+                "comments": {"/COMMIT_MSG": [{"line": 32, "message":
+                    "(style) the ll_io_zero_page()/ll_io_read_page() "
+                    "interaction, and `already_code`, and "
+                    "/sys/fs/lustre/<name>/ and fc->security."}]}}
+        change = _change()
+        change.subject = "LU-1 llite: fix ll_io_zero_page"
+        md = review_markdown(change, spec)
+        assert md.startswith("# 63809 ps54 — LU-1 llite: fix "
+                             "`ll_io_zero_page`\n")
+        assert "Looks good; see `ll_io_zero_page()`." in md
+        assert ("the `ll_io_zero_page()/ll_io_read_page()` interaction, "
+                "and `already_code`, and `/sys/fs/lustre/<name>/` and "
+                "`fc->security`." in md)
+
     def test_write_creates_markdown_dir(self, tmp_path):
         path = write_review_markdown(tmp_path, _change(), SPEC,
                                      severity="high")
@@ -267,3 +285,102 @@ class TestRenderExisting:
             files=[d / "gerrit-review-63809_ps54.json", odd])
         assert len(written) == 1
         assert skipped[0][0] == odd
+
+class TestMessageMarkdown:
+
+    def test_prose_left_alone(self):
+        from lreview.markdown import inline_markdown
+        for text in ("Some concerns, see inline comments.",
+                     "rc > 0 and rc < 1", "1 finding(s)",
+                     "https://example.com/a_b_c",
+                     "a -> b"):
+            assert inline_markdown(text) == text
+
+    def test_surrounding_punctuation_stays_outside(self):
+        from lreview.markdown import inline_markdown
+        assert inline_markdown("(foo_bar)") == "(`foo_bar`)"
+        assert inline_markdown("foo(), bar_baz.") == "`foo()`, `bar_baz`."
+        assert (inline_markdown("vvp_io_fini()->ll_layout_restore(),")
+                == "`vvp_io_fini()->ll_layout_restore()`,")
+        assert inline_markdown("the * column") == "the `*` column"
+
+    def test_list_and_quote_markers_kept(self):
+        from lreview.markdown import message_markdown
+        assert message_markdown("* a_b\n- c_d\n1. e_f\n> g_h") == (
+            "* `a_b`\n- `c_d`\n1. `e_f`\n> `g_h`")
+
+    def test_code_blocks_fenced(self):
+        """Indented code is fenced and dedented; a fenced block is kept
+        as is."""
+        from lreview.markdown import message_markdown
+        text = ("Would this work?\n"
+                "    cl_io_fini(env, io);\n"
+                "\n"
+                "    if (io->ci_need_restart)\n"
+                "\n"
+                "```\n"
+                "foo_bar(*p);\n"
+                "```\n"
+                "done_here")
+        assert message_markdown(text) == (
+            "Would this work?\n"
+            "\n"
+            "```\n"
+            "cl_io_fini(env, io);\n"
+            "\n"
+            "if (io->ci_need_restart)\n"
+            "```\n"
+            "\n"
+            "```\n"
+            "foo_bar(*p);\n"
+            "```\n"
+            "\n"
+            "`done_here`")
+
+    def test_unindented_code_fenced(self):
+        from lreview.markdown import message_markdown
+        text = ("Would something like this work instead?\n"
+                "cl_io_fini(env, io);\n"
+                "if (io->ci_need_restart)\n"
+                "\tgoto again;\n"
+                "Not a regression.")
+        assert message_markdown(text) == (
+            "Would something like this work instead?\n"
+            "\n"
+            "```\n"
+            "cl_io_fini(env, io);\n"
+            "if (io->ci_need_restart)\n"
+            "\tgoto again;\n"
+            "```\n"
+            "\n"
+            "Not a regression.")
+
+    def test_commit_message_lines_fenced(self):
+        """A suggested trailer or subject is fenced whole, not just the
+        identifiers in it; prose naming a trailer is not."""
+        from lreview.markdown import message_markdown
+        text = ("(style) No Fixes: tag. Consider adding:\n"
+                "\n"
+                "Fixes: edcd05e5ac (\"LU-15803 sec: fix ll_io_zero_page\")\n"
+                "Signed-off-by: A Dev <a.dev@example.com>\n"
+                "\n"
+                "and a subject such as\n"
+                "LU-1 llite: keep zero_page owned")
+        assert message_markdown(text) == (
+            "(style) No Fixes: tag. Consider adding:\n"
+            "\n"
+            "```\n"
+            "Fixes: edcd05e5ac (\"LU-15803 sec: fix ll_io_zero_page\")\n"
+            "Signed-off-by: A Dev <a.dev@example.com>\n"
+            "```\n"
+            "\n"
+            "and a subject such as\n"
+            "\n"
+            "```\n"
+            "LU-1 llite: keep zero_page owned\n"
+            "```")
+
+    def test_fence_longer_than_backticks_inside(self):
+        from lreview.markdown import message_markdown
+        assert message_markdown("    a = ```b```;") == (
+            "````\na = ```b```;\n````")

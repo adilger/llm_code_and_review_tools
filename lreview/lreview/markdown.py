@@ -11,6 +11,7 @@ review of that change+patchset.
 import json
 import os
 import re
+import textwrap
 from pathlib import Path
 from typing import Any, Optional
 
@@ -40,6 +41,144 @@ def markdown_filename(change, tag: str = "") -> str:
         return f"{change.slug}_{_sanitize(change.subject)}{tag}.md"
     return (f"{change.number}_{_sanitize(change.subject)}"
             f"_ps{change.patchset}{tag}.md")
+
+
+# Review messages are written for Gerrit, which shows them as plain
+# text: identifiers like ll_io_zero_page()/ll_io_read_page() would
+# turn into italics in Markdown, and <name> into a vanished HTML tag.
+_CODE_SPAN_RE = re.compile(r"`[^`\n]+`")
+_CODE_LIKE_RE = re.compile(r"[_*\\`]|\w->|<\w|\w>|\w\(\)")
+_LEAD_PUNCT = "\"'([{"
+_TRAIL_PUNCT = "\"'.,;:!?)]}"
+_PAIRS = {")": "(", "]": "[", "}": "{"}
+# quote and list markers mean the same in Gerrit and Markdown
+_BLOCK_MARKER_RE = re.compile(r"\s*(?:>\s*)*(?:[-*+]\s+|\d+[.)]\s+)?")
+
+
+def _code_core(token: str) -> tuple[str, str, str]:
+    """Split a whitespace-delimited token into (lead, core, trail):
+    the surrounding prose punctuation and what is left. A closing
+    bracket stays when the core opens it, as in foo()."""
+    start, end = 0, len(token)
+    while start < end and token[start] in _LEAD_PUNCT:
+        start += 1
+    while end > start and token[end - 1] in _TRAIL_PUNCT:
+        ch = token[end - 1]
+        core = token[start:end]
+        if ch in _PAIRS and core.count(_PAIRS[ch]) >= core.count(ch):
+            break
+        end -= 1
+    return token[:start], token[start:end], token[end:]
+
+
+def _code_token(token: str) -> str:
+    lead, core, trail = _code_core(token)
+    if (not core or not _CODE_LIKE_RE.search(core)
+            or core.startswith(("http://", "https://"))):
+        return token
+    fence = "``" if "`" in core else "`"
+    pad = " " if core.startswith("`") or core.endswith("`") else ""
+    return f"{lead}{fence}{pad}{core}{pad}{fence}{trail}"
+
+
+def inline_markdown(text: str) -> str:
+    """One line of plain prose as Markdown: code-like tokens (anything
+    with _ * \\ ` -> <tag> or a call's ()) go into code spans, so their
+    characters show as written. Existing `code spans` are kept."""
+    out = []
+    pos = 0
+    for span in _CODE_SPAN_RE.finditer(text):
+        out.append(_inline_prose(text[pos:span.start()]))
+        out.append(span.group())
+        pos = span.end()
+    out.append(_inline_prose(text[pos:]))
+    return "".join(out)
+
+
+def _inline_prose(text: str) -> str:
+    return "".join(_code_token(part) if part and not part.isspace()
+                   else part for part in re.split(r"(\s+)", text))
+
+
+# whole lines meant for a commit message: trailers and subject lines
+_COMMIT_LINE_RE = re.compile(
+    r"\s*(?:Fixes:\s+[0-9a-f]{7,40}\b"
+    r"|(?:Change-Id|Signed-off-by|Reviewed-by|Reviewed-on|Tested-by"
+    r"|Acked-by|Reported-by|Suggested-by|Co-developed-by"
+    r"|Co-[Aa]uthored-[Bb]y|Test-Parameters|Lustre-change"
+    r"|Lustre-commit|Link|Closes|Cc):\s+\S"
+    r"|[A-Z][A-Z0-9]*-\d+ [\w./-]+: \S)")
+# a source or shell line written without indentation
+_CODE_LINE_RE = re.compile(
+    r".*[;{}]\s*$"
+    r"|\s*#\s*(?:include|define|undef|if|ifdef|ifndef|elif|else|endif)\b"
+    r"|\s*(?:if|while|for|switch)\s*\(.*\)\s*$"
+    r"|\s*(?:else|do)\s*$"
+    r"|\s*(?:/\*|\*/|//)"
+    r"|\s+\*(?:\s|/|$)"
+    r"|\$ \S"
+    r"|@@ ")
+
+
+def _line_kind(line: str) -> str:
+    if not line.strip():
+        return "blank"
+    if line.lstrip().startswith("```"):
+        return "fence"
+    if line.startswith(("    ", "\t")) or _CODE_LINE_RE.match(line):
+        return "code"
+    if _COMMIT_LINE_RE.match(line):
+        return "commit"
+    return "prose"
+
+
+def _fenced(block: list[str]) -> list[str]:
+    body = textwrap.dedent("\n".join(block)).split("\n")
+    runs = re.findall(r"`+", "\n".join(body))
+    fence = "`" * max(3, max(map(len, runs), default=0) + 1)
+    return [fence, *body, fence]
+
+
+def message_markdown(text: str) -> str:
+    """A Gerrit plain-text review message as Markdown. Code - indented,
+    or source and shell lines that are not - and lines meant for a
+    commit message (Fixes: and other trailers, a subject line) become
+    fenced blocks, to be read and copied as written; fenced blocks
+    already there are kept. Every other line goes through
+    inline_markdown()."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        kind = _line_kind(lines[i])
+        if kind == "fence":
+            end = i + 1
+            while end < len(lines) and _line_kind(lines[end]) != "fence":
+                end += 1
+            block = lines[i:end + 1]
+        elif kind in ("code", "commit"):
+            # blank lines stay inside a block that goes on after them
+            end = nxt = i + 1
+            while nxt < len(lines):
+                if _line_kind(lines[nxt]) == kind:
+                    end = nxt + 1
+                elif _line_kind(lines[nxt]) != "blank":
+                    break
+                nxt += 1
+            block = _fenced(lines[i:end])
+            end -= 1
+        else:
+            marker = _BLOCK_MARKER_RE.match(lines[i]).group()
+            out.append(marker + inline_markdown(lines[i][len(marker):]))
+            i += 1
+            continue
+        if out and out[-1].strip():
+            out.append("")
+        out += block
+        i = end + 1
+        if i < len(lines) and lines[i].strip():
+            out.append("")
+    return "\n".join(out)
 
 
 def iter_findings(spec: dict):
@@ -116,15 +255,18 @@ def review_markdown(
     if change.number is None:  # local review
         ref_name = getattr(change, "ref_name", "local")
         lines = [
-            f"# {ref_name} — {change.subject}",
+            f"# {inline_markdown(ref_name)} — "
+            f"{inline_markdown(change.subject)}",
             "",
-            f"- **Commit:** `{change.sha[:12]}` ({ref_name}, local "
-            "review — not tied to a Gerrit change)",
+            f"- **Commit:** `{change.sha[:12]}` "
+            f"({inline_markdown(ref_name)}, local review — not tied to "
+            "a Gerrit change)",
             f"- **Review:** {', '.join(review_bits)}",
         ]
     elif getattr(change, "provider", None) == "github":
         lines = [
-            f"# {change.project}#{change.number} — {change.subject}",
+            f"# {change.project}#{change.number} — "
+            f"{inline_markdown(change.subject)}",
             "",
             f"- **Pull request:** {change.url} (head `{change.sha[:12]}`, "
             f"base `{change.base_sha[:12]}`)",
@@ -134,7 +276,8 @@ def review_markdown(
         url = (f"{change.base_url.rstrip('/')}/c/{change.project}"
                f"/+/{change.number}")
         lines = [
-            f"# {change.number} ps{change.patchset} — {change.subject}",
+            f"# {change.number} ps{change.patchset} — "
+            f"{inline_markdown(change.subject)}",
             "",
             f"- **Change:** {url} (patchset {change.patchset}, "
             f"`{change.sha[:12]}`)",
@@ -152,7 +295,8 @@ def review_markdown(
 
     message = (spec or {}).get("message")
     if message:
-        lines += ["## Overall assessment", "", message, ""]
+        lines += ["## Overall assessment", "", message_markdown(message),
+                  ""]
 
     lines += ["## Findings", ""]
     if spec is None:
@@ -167,7 +311,7 @@ def review_markdown(
                 else " *(informational)*")
         lines.append(f"### {i}. {_anchor(path, entry)}{note}")
         lines.append("")
-        lines.append(entry.get("message", "").strip())
+        lines.append(message_markdown(entry.get("message", "").strip()))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
