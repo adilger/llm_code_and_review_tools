@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Unified installer for LLM Code and Review Tools
-# Installs: jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, and gerrit-dashboard
+# Installs: jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-retest, and gerrit-dashboard
 #
 # Run it either way:
 #   ./install.sh [OPTIONS]          # normal run
@@ -62,13 +62,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Console scripts our packages install (used for ~/.local/bin symlinks
 # when installing into a venv, and for cleanup on uninstall)
-TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview"
+TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview pw-retest"
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "       source $0 [OPTIONS]   (activates the venv in your shell)"
     echo ""
-    echo "Install LLM code and review tools (jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, gerrit-dashboard)"
+    echo "Install LLM code and review tools (jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-retest, gerrit-dashboard)"
     echo ""
     echo "Options:"
     echo "  --help, -h     Show this help message"
@@ -385,6 +385,9 @@ install_tools() {
     # Install lreview
     install_tool lreview "$SCRIPT_DIR/lreview"
 
+    # Install pw_retest
+    install_tool pw-retest "$SCRIPT_DIR/pw_retest"
+
     # Install drgn + lustre-drgn-tools
     if [[ "$(uname -s)" == "Darwin" && -z "${LLM_TOOLS_TRY_DRGN:-}" ]]; then
         # drgn ships no macOS wheels, its source build uses Linux-only
@@ -447,6 +450,7 @@ install_tools() {
     echo "  lustre-crash    - Non-interactive crash dump analysis"
     echo "  janitor         - Gerrit Janitor test results"
     echo "  lreview         - Parallel AI patch reviews (kreview)"
+    echo "  pw-retest       - Have Patch Watcher retest or shepherd a change"
     echo ""
     echo "Verify installation:"
     echo "  jira --help"
@@ -456,6 +460,7 @@ install_tools() {
     echo "  lustre-crash --help"
     echo "  janitor --help"
     echo "  lreview check"
+    echo "  pw-retest whoami"
     echo ""
     echo "See AGENTS.md for usage documentation."
 }
@@ -498,6 +503,9 @@ uninstall_tools() {
 
     echo "Uninstalling lreview..."
     $PYTHON -m pip uninstall -y lreview 2>/dev/null || true
+
+    echo "Uninstalling pw-retest..."
+    $PYTHON -m pip uninstall -y pw-retest 2>/dev/null || true
 
     echo "Uninstalling gerrit-dashboard..."
     $PYTHON -m pip uninstall -y gerrit-dashboard 2>/dev/null || true

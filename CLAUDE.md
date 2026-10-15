@@ -219,12 +219,18 @@ Also installed from this repo:
   `JANITOR_URL` env var. See the top-level `README.md`.
 - `lustre-crash` — drgn-based crash-dump analysis; no auth.
   See `lustre_crash/README.md`.
+- `pw-retest`: has Patch Watcher retest or shepherd a change, or stop,
+  halt or release one you had it watch, signed in with gerrit-cli's
+  Gerrit login (its `/tagger/v1/` routes check it with Gerrit). For
+  people with a Gerrit account and nothing more; `pw-watch` is the
+  full client.
 
 ## Claude skills
 
 `skills/` holds task-shaped skills for these tools --
 `lustre-ci-triage`, `gerrit-patch-workflow`, `lreview-spin-cycle`,
-`lustre-crash-triage`, `jira-bug-research`, `lustre-debug-logs`. `./install.sh` links them
+`lustre-crash-triage`, `jira-bug-research`, `lustre-debug-logs`,
+`pw-retest`. `./install.sh` links them
 into `~/.claude/skills`; `--skills` does only that, `--no-skills`
 skips it. They are symlinks, so edits in this checkout take effect
 immediately -- edit the skill here, not the copy in `~/.claude`.

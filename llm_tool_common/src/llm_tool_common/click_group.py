@@ -75,6 +75,8 @@ class JsonErrorGroup(JsonUsageErrorGroup):
                 ctx.invoked_subcommand or "cli",
                 bool(ctx.params.get("envelope")),
                 err.exit_code,
+                err.details or None,
+                err.http_status,
             )
 
 
@@ -105,7 +107,10 @@ def _emit(
     envelope: bool,
     exit_code: int,
     details: dict[str, Any] | None = None,
+    http_status: int | None = None,
 ) -> NoReturn:
-    env = error_response_from_dict(code, message, tool, command, details=details)
+    env = error_response_from_dict(
+        code, message, tool, command, http_status=http_status, details=details
+    )
     click.echo(format_json(env, full_envelope=envelope))
     raise click.exceptions.Exit(int(exit_code))

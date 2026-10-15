@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pw-retest"
+version = "0.1.0"
+description = "Have Patch Watcher retest or shepherd a Gerrit change, signed in with a Gerrit login"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "LLM Code Tools Team"}
+]
+dependencies = [
+    "click>=8.0.0",
+    "requests>=2.28.0",
+    "llm-tool-common",
+]
+
+[project.scripts]
+pw-retest = "pw_retest.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pw_retest*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "integration: marks tests as integration tests (may require network)",
+    "unit: marks tests as unit tests",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+ignore = ["E501", "B008"]
