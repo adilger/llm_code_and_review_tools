@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pw-retest"
-version = "0.1.0"
-description = "Have Patch Watcher retest or shepherd a Gerrit change, signed in with a Gerrit login"
+version = "0.1.1"
+description = "Ask Patch Watcher for what tagging it on a Gerrit change asks, signed in with a Gerrit login"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [

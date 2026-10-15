@@ -144,3 +144,34 @@ def test_network_trouble_is_a_network_error():
 def test_envelope_anywhere():
     code, out, _ = run("whoami", "--envelope", answers=[(200, {"username": "alice"})])
     assert code == 0 and out["ok"] is True and out["data"]["username"] == "alice"
+
+
+def test_watch_takes_any_level():
+    _, _, sent = run("watch", "1", "2", "--level", "bigfix", answers=[(200, {}), (200, {})])
+    assert [(url.rsplit("/", 2)[-2], body) for _, url, body, _ in sent] == [
+        ("1", {"level": "bigfix"}), ("2", {"level": "bigfix"}),
+    ]
+
+
+def test_runs_go_to_their_routes():
+    _, _, sent = run("reviewers", "1", answers=[(200, {"run_id": "r"})])
+    assert sent[0][1].endswith("/changes/1/reviewers") and sent[0][2] == {}
+    _, _, sent = run("lreview", "1", "--light", answers=[(200, {})])
+    assert sent[0][1].endswith("/changes/1/lreview") and sent[0][2] == {"mode": "light"}
+    _, _, sent = run("request", "1", "run", "sanity", "56", answers=[(200, {})])
+    assert sent[0][1].endswith("/changes/1/request") and sent[0][2] == {"text": "run sanity 56"}
+    _, _, sent = run("feedback", "1", "too", "chatty", answers=[(200, {})])
+    assert sent[0][1].endswith("/changes/1/feedback") and sent[0][2] == {"text": "too chatty"}
+
+
+def test_a_request_may_come_from_stdin():
+    sent = []
+
+    def fake(method, url, **kwargs):
+        sent.append(kwargs.get("json"))
+        return FakeResponse(200, {})
+
+    with patch.object(cli.requests, "request", side_effect=fake):
+        result = CliRunner().invoke(cli.main, ["request", "1", "-"], input="line one\n\nline two\n")
+    assert result.exit_code == 0
+    assert sent == [{"text": "line one\n\nline two\n"}]

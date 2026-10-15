@@ -1,9 +1,11 @@
-"""pw-retest: have Patch Watcher retest or shepherd a Gerrit change.
+"""pw-retest: ask Patch Watcher what tagging it on a Gerrit change asks.
 
 Patch Watcher's /tagger/v1/ routes take a Gerrit username and HTTP password,
 check them with Gerrit, and then do what tagging the bot on the change would
-do for that account: watch it at retest or shepherd, and stop, halt or
-release one you had it watch.  The login is gerrit-cli's, from
+do for that account, as Patch Watcher's roles allow it: set the change's
+level (retest and shepherd for anyone), stop, halt or release it, find
+reviewers, run an AI review, start a request run, or pass on feedback.
+Backlog work is not offered.  The login is gerrit-cli's, from
 ~/.config/gerrit-cli/.env (or GERRIT_USER and GERRIT_PASS), and --user picks
 another of its credential sets.
 """
@@ -181,9 +183,10 @@ class RetestGroup(JsonErrorGroup):
          "from ~/.config/gerrit-cli/.env",
 )
 def main(envelope: bool, user: str | None) -> None:
-    """Have Patch Watcher retest or shepherd Gerrit changes, as your Gerrit account.
+    """Ask Patch Watcher, as your Gerrit account, what tagging it on a change asks.
 
-    CHANGE is a change number or a Gerrit URL.  Output is JSON.
+    CHANGE is a change number or a Gerrit URL.  Output is JSON.  What you may
+    do is what your tags may: `whoami` says.
     """
     global _FULL_ENVELOPE
     _FULL_ENVELOPE = envelope
@@ -228,6 +231,19 @@ def shepherd(changes: tuple[str, ...]) -> None:
 
 @main.command()
 @click.argument("changes", nargs=-1, required=True)
+@click.option(
+    "--level", "-l", required=True,
+    help="retest, shepherd, smallfix, bigfix or own; whoami lists the ones you may set.",
+)
+def watch(changes: tuple[str, ...], level: str) -> None:
+    """Watch each change at LEVEL, or move it to LEVEL."""
+    _each(changes, "watch", lambda number: call(
+        "POST", f"changes/{number}/watch", {"level": level},
+    ))
+
+
+@main.command()
+@click.argument("changes", nargs=-1, required=True)
 def stop(changes: tuple[str, ...]) -> None:
     """Stop watching each change, and stop any run working on it."""
     _each(changes, "stop", lambda number: call("POST", f"changes/{number}/unwatch", {}))
@@ -250,6 +266,51 @@ def clear_halt(change: str, note: str | None) -> None:
     number = parse_change(change)
     body = {"note": note} if note else {}
     _emit(call("POST", f"changes/{number}/clear-halt", body), "clear-halt")
+
+
+
+def _text(words: tuple[str, ...]) -> str:
+    """The words given, or standard input for a lone "-"."""
+    if words == ("-",):
+        return click.get_text_stream("stdin").read()
+    return " ".join(words)
+
+
+@main.command()
+@click.argument("changes", nargs=-1, required=True)
+def reviewers(changes: tuple[str, ...]) -> None:
+    """Have the bot find and add reviewers to each change, once."""
+    _each(changes, "reviewers", lambda number: call("POST", f"changes/{number}/reviewers", {}))
+
+
+@main.command()
+@click.argument("changes", nargs=-1, required=True)
+@click.option("--light", is_flag=True, help="A quicker single pass.")
+def lreview(changes: tuple[str, ...], light: bool) -> None:
+    """Run an AI code review of each change's current patchset, posted on it."""
+    body = {"mode": "light" if light else "full"}
+    _each(changes, "lreview", lambda number: call("POST", f"changes/{number}/lreview", body))
+
+
+@main.command()
+@click.argument("change")
+@click.argument("text", nargs=-1, required=True)
+def request(change: str, text: tuple[str, ...]) -> None:
+    """Start one run on CHANGE that does what TEXT asks ("-" reads it from stdin).
+
+    The request is posted on the change, and the run answers it there.
+    """
+    number = parse_change(change)
+    _emit(call("POST", f"changes/{number}/request", {"text": _text(text)}), "request")
+
+
+@main.command()
+@click.argument("change")
+@click.argument("text", nargs=-1, required=True)
+def feedback(change: str, text: tuple[str, ...]) -> None:
+    """Pass a note about the bot's work on CHANGE to its operators ("-" reads stdin)."""
+    number = parse_change(change)
+    _emit(call("POST", f"changes/{number}/feedback", {"text": _text(text)}), "feedback")
 
 
 if __name__ == "__main__":

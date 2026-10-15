@@ -219,11 +219,12 @@ Also installed from this repo:
   `JANITOR_URL` env var. See the top-level `README.md`.
 - `lustre-crash` — drgn-based crash-dump analysis; no auth.
   See `lustre_crash/README.md`.
-- `pw-retest`: has Patch Watcher retest or shepherd a change, or stop,
-  halt or release one you had it watch, signed in with gerrit-cli's
-  Gerrit login (its `/tagger/v1/` routes check it with Gerrit). For
-  people with a Gerrit account and nothing more; `pw-watch` is the
-  full client.
+- `pw-retest`: asks Patch Watcher for what tagging it on a change asks
+  (levels, stop, halt, reviewers, lreview, request runs, feedback; not
+  backlog), signed in with gerrit-cli's Gerrit login, which its
+  `/tagger/v1/` routes check with Gerrit. Its roles decide what each
+  person may do, as for tags. `pw-watch` is the Authelia-login client
+  for everything else.
 
 ## Claude skills
 
