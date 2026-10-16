@@ -394,6 +394,11 @@ install_tools() {
     install_tool lreview "$SCRIPT_DIR/lreview"
 
     # Install pw_cli
+    # pw-cli's old name
+    if "$PYTHON" -c 'import importlib.metadata as m; m.distribution("pw-retest")' \
+            2>/dev/null; then
+        $PYTHON -m pip uninstall -y pw-retest 2>/dev/null || true
+    fi
     install_tool pw-cli "$SCRIPT_DIR/pw_cli"
 
     # Install drgn + lustre-drgn-tools
