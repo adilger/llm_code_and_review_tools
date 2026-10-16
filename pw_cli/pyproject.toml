@@ -19,8 +19,6 @@ dependencies = [
 
 [project.scripts]
 pw-cli = "pw_cli.cli:main"
-# The old name, kept for what still calls it.
-pw-retest = "pw_cli.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

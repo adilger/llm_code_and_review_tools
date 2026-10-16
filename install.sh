@@ -62,7 +62,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Console scripts our packages install (used for ~/.local/bin symlinks
 # when installing into a venv, and for cleanup on uninstall)
-TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview pw-cli pw-retest"
+TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview pw-cli"
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -252,6 +252,14 @@ link_venv_tools() {
             ln -sf "$VENV_USED/bin/$t" "$bin_dir/$t"
             linked="$linked $t"
         fi
+    done
+    # A command a package no longer installs leaves its link dangling.
+    local link
+    for link in "$bin_dir"/*; do
+        [ -L "$link" ] && [ ! -e "$link" ] || continue
+        case "$(readlink "$link")" in
+            "$VENV_USED"/bin/*) rm -f "$link"; echo "  removed $link" ;;
+        esac
     done
     [ -n "$linked" ] || return 0
     echo "Symlinked into $bin_dir (no venv activation needed):"
