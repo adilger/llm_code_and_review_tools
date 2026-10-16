@@ -212,10 +212,12 @@ violates them cannot be pushed:
   authoritative list.
 - On amend, preserve the existing `Change-Id`. Never invent one, and
   never add one to a new commit -- the hook generates it.
-- `Test-Parameters` belongs only on test-only patches. The exception: a
-  patch whose only kernel change is to debug messages (the text,
-  arguments or mask of a `CDEBUG`, `CERROR` and the like) may still carry
-  `Test-Parameters: trivial`.
+- `Test-Parameters` lines (`testlist=`, `clientdistro=`, `env=` and the
+  like) may go on any patch, to run the tests or distros that exercise
+  it. Only `Test-Parameters: trivial`, which cuts CI back to a minimal
+  run, is restricted: use it on test-only patches, or on a patch whose
+  only kernel change is to debug messages (the text, arguments or mask
+  of a `CDEBUG`, `CERROR` and the like).
 - Check before committing: `git diff HEAD | ./contrib/scripts/checkpatch.pl`
 
 A commit message that walks through the code is too verbose. Describe
