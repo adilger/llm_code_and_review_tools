@@ -968,7 +968,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  -j, --jobs N     parallel reviews (default: 5)\n"
             "  --mode NAME      full (default) or light — one cheap\n"
             "                   focused pass instead of the deep dive\n"
-            "  --agent NAME     claude (default), codex, gemini, opencode\n"
+            "  --agent NAME     claude (default), codex, gemini, opencode, auggie\n"
             "  --model NAME     claude: sonnet (default), opus, fable\n"
             "                   codex: gpt-6.1-sol (default), astra, terra,\n"
             "                   luna, ... — see 'lreview models'\n"

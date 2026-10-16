@@ -11,7 +11,9 @@ PROMPT = ("Using the prompt /p/review-core.md run a deep dive "
 class TestRegistry:
 
     def test_supported_agents(self):
-        assert set(AGENTS) == {"claude", "codex", "gemini", "opencode"}
+        assert set(AGENTS) == {"claude", "codex", "gemini", "opencode", "auggie"}
+        assert AGENTS["auggie"].stream_json is True
+        assert AGENTS["auggie"].verified is False
         for name in ("claude", "codex"):
             assert AGENTS[name].stream_json is True
             assert AGENTS[name].verified is True
@@ -25,6 +27,13 @@ class TestRegistry:
 
 
 class TestBuildCmd:
+
+    def test_auggie_print_and_billing(self):
+        cmd = get_agent("auggie").build_cmd("model-id", "high", ["--extra"], PROMPT)
+        assert cmd == ["auggie", "--print", "--output-format", "json", "--show-cost",
+                       "--log-file", "-", "--log-level", "info",
+                       "--permission", "launch-process:allow", "--model", "model-id",
+                       "--reasoning-effort", "high", "--extra", PROMPT]
 
     def test_claude_prompt_and_stream_json(self):
         cmd = get_agent("claude").build_cmd(
@@ -127,7 +136,7 @@ class TestBuildInteractiveCmd:
                        "--prompt", PROMPT]
 
     def test_no_bypass_flags_in_interactive_mode(self):
-        for name in ("claude", "codex", "gemini", "opencode"):
+        for name in ("claude", "codex", "gemini", "opencode", "auggie"):
             cmd = get_agent(name).build_interactive_cmd(None, [], PROMPT)
             joined = " ".join(cmd)
             assert "yolo" not in joined

@@ -35,7 +35,7 @@ exact instructions for anything missing:
 
 1. **An agent CLI** on PATH — `claude` (Claude Code, the default;
    `npm install -g @anthropic-ai/claude-code`, then log in), or
-   `codex` / `gemini` / `opencode` for other AIs (see Agents below).
+   `codex` / `auggie` / `gemini` / `opencode` for other AIs (see Agents below).
 2. **The review prompts** — bundled with this repository as the
    [review-prompts](https://github.com/verygreen/review-prompts/)
    submodule, which `./install.sh` initializes automatically (or
@@ -66,7 +66,7 @@ silent offline). `LREVIEW_PROMPTS_UPDATE=off` disables the check,
 ## Agents
 
 > **Disclaimer:** **claude** and **codex** are verified end-to-end.
-> gemini and opencode are untested best-effort integrations — expect
+> auggie, gemini and opencode are best-effort integrations — expect
 > to tweak invocation flags (`--agent-arg`) and please report what
 > works.
 
@@ -83,7 +83,7 @@ analysis of the top commit
 ("deep dive regression analysis" is deliberate — per the
 review-prompts README it gets better prompt compliance than calling
 it a review.) Select the backend with
-`--agent {claude,codex,gemini,opencode}` or `LREVIEW_AGENT`:
+`--agent {claude,codex,gemini,opencode,auggie}` or `LREVIEW_AGENT`:
 
 - **claude** (default) — run with stream-json output, which is what
   powers the live token counter, final token/cost figures, and model
@@ -94,6 +94,12 @@ it a review.) Select the backend with
   status line counts log size while a review is running and the token
   figure appears on completion; a ChatGPT-plan run reports no dollar
   cost, so cost stays blank. See "Codex models and effort" below.
+- **auggie (Augment)** — uses the official Auggie CLI in print mode with
+  JSON results and reported billing. Install `@augmentcode/auggie` and run
+  `auggie login`; choose a model from `auggie models list --json`.
+  Reasoning uses `--reasoning-effort`. Credits are not converted to dollars;
+  Auggie may omit token counts. The adapter is tested with a fake worker;
+  a live account review has not yet been verified.
 - **gemini / opencode** — best-effort backends via `gemini --yolo -p`
   or `opencode run`. Reviews, logs, collection, and posting all work,
   but there is no token/cost/model reporting and the invocations have
@@ -684,10 +690,10 @@ needed: chat defaults to the repository recorded in the manifest at
 review time.
 
 Like `run`, chat picks its backend with `--agent
-{claude,codex,gemini,opencode}` or `$LREVIEW_AGENT` (default claude —
+{claude,codex,gemini,opencode,auggie}` or `$LREVIEW_AGENT` (default claude —
 the verified one; the others are best-effort). The interactive
 invocations are taken from each CLI's official docs: claude and
-codex take the seed prompt as a bare positional argument, gemini
+codex take the seed prompt as a bare positional argument, as does auggie; gemini
 needs `-i/--prompt-interactive` (`-p` and, on older releases, a bare
 positional are one-shot), and opencode takes `--prompt` (its root
 positional is a project *path*). All are auto-submitted as the first
@@ -714,9 +720,9 @@ opencode's `--model` wants the `provider/model` form.
 | `--results-dir DIR` | `$LREVIEW_RESULTS_DIR`, else `lreview-results/` in the llm tools checkout (cwd-relative without a checkout) | Logs, JSONs, summary.json |
 | `--worktrees-dir DIR` | auto | Where worktrees are created |
 | `--keep-worktrees` | off | Keep worktrees after review |
-| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex (verified), gemini, opencode |
-| `--model NAME` | `sonnet` for claude, `gpt-6.1-sol` for codex (or `$LREVIEW_MODEL`); gemini/opencode use their own default | Model for the review runs; see `lreview models` |
-| `--effort LEVEL` | agent's default (or `$LREVIEW_EFFORT`) | Reasoning effort: low/medium/high/xhigh/max, plus `ultra` on the codex models that have it — claude (`--effort`) or codex (`-c model_reasoning_effort=...`); ignored for gemini/opencode. The ladder is per model and checked before the run |
+| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex (verified), auggie, gemini, opencode |
+| `--model NAME` | `sonnet` for claude, `gpt-6.1-sol` for codex (or `$LREVIEW_MODEL`); auggie/gemini/opencode use their own default | Model for the review runs; see `lreview models` or `auggie models list --json` |
+| `--effort LEVEL` | agent's default (or `$LREVIEW_EFFORT`) | Reasoning effort: low/medium/high/xhigh/max, plus `ultra` on the codex models that have it — claude (`--effort`), codex (`-c model_reasoning_effort=...`) or auggie (`--reasoning-effort`); ignored for gemini/opencode. Known model ladders are checked before the run; Auggie validates its own model/effort support |
 | `--memory, -m` | off | Read/update the per-change review memory document |
 | `--clear-memory, -c` | off | With `-m`: delete the change's memory document first |
 | `--no-resume` | off | With `-m` (claude): start a fresh session from the memory document instead of resuming the recorded review conversation |

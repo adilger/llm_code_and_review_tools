@@ -431,6 +431,14 @@ class TestTokenParsing:
         assert parse_final_usage(log) == (None, None)
         assert parse_final_usage(tmp_path / "missing.log") == (None, None)
 
+    def test_parse_auggie_billing_does_not_turn_credits_into_dollars(self, tmp_path):
+        from lreview.runner import parse_final_usage
+        log = tmp_path / "auggie.log"
+        log.write_text('{"type":"result","billing":{"usage_unit":"usd","total_cost":0.42}}\n')
+        assert parse_final_usage(log) == (None, 0.42)
+        log.write_text('{"type":"result","billing":{"usage_unit":"credits","total_cost":42}}\n')
+        assert parse_final_usage(log) == (None, None)
+
 
 class TestCountFindings:
 

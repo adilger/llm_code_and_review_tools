@@ -31,6 +31,9 @@ AGENT_INSTALL = {
     "opencode": (
         "npm install -g opencode-ai\n"
         "  then run 'opencode auth login'"),
+    "auggie": (
+        "npm install -g @augmentcode/auggie\n"
+        "  then run 'auggie login'"),
 }
 
 
