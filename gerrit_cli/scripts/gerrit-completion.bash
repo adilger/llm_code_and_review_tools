@@ -10,7 +10,7 @@ _gerrit_completions() {
     _init_completion || return
 
     local global_opts="--envelope --help --user --version -U -h"
-    local commands="abandon abort ack add-reviewer batch checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch push rebase related remove-reviewer reply restore review review-series reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
+    local commands="abandon abort ack add-reviewer batch check checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch push rebase related remove-reviewer reply restore review review-series reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
 
     # The command is the first word that is not a global option.
     local cmd="" i=1
@@ -46,6 +46,7 @@ _gerrit_completions() {
         ack) opts="--envelope --help --pretty --user -U -h -p" ;;
         add-reviewer) opts="--cc --dry-run --envelope --help --pretty --user -U -h -n -p" ;;
         batch) opts="--dry-run --envelope --help --pretty --user -U -h -n -p" ;;
+        check) opts="--envelope --help --offline --user -U -h" ;;
         checkout|co) opts="--branch --envelope --help --patchset --pretty --user -U -b -h -p -r" ;;
         comments|extract) opts="--all --context-lines --envelope --fields --help --include-ci --include-system --no-context --pretty --since --summary --timeline --user -U -a -c -h -p -s" ;;
         continue-reintegration) opts="--envelope --help --user -U -h" ;;
