@@ -1031,6 +1031,47 @@ class MalooClient:
             )
         return resp.content
 
+    def list_test_logs(
+        self, test_set_id: str, timeout: int = 60
+    ) -> list[dict[str, str]]:
+        """List the log files linked on a test set's web page.
+
+        The download_logs archive omits the per-test debug_log, dmesg
+        and test_log files. The test set page links every file as
+        /test_logs/<id>/download.
+
+        Returns:
+            A list of {"name": file name, "id": test_log UUID}.
+        """
+        web = self._web_login()
+        resp = self._retried(
+            web.get,
+            f"{self.config.base_url}/test_sets/{test_set_id}",
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return [
+            {"name": m.group(1).strip(), "id": m.group(2)}
+            for m in re.finditer(
+                r"<p[^>]*>([^<]+)</p>\s*\[ <a[^>]*"
+                r'href="/test_logs/([0-9a-f-]+)/download"',
+                resp.text,
+            )
+        ]
+
+    def download_test_log(
+        self, test_log_id: str, timeout: int = 120
+    ) -> bytes:
+        """Download one file from /test_logs/<id>/download."""
+        web = self._web_login()
+        resp = self._retried(
+            web.get,
+            f"{self.config.base_url}/test_logs/{test_log_id}/download",
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.content
+
     def retest(
         self,
         session_id: str,

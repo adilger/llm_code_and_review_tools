@@ -1703,11 +1703,15 @@ def retest(session_url: str, jira_ticket: str, option: str, pretty: bool) -> Non
                    "(default: $TMPDIR/maloo_logs/<test_set_id>)")
 @click.option("--grep", "grep_pattern", type=str, default=None,
               help="Search extracted logs for a pattern (grep -i)")
+@click.option("--test-logs", is_flag=True,
+              help="Also fetch the per-test debug_log (lctl dk), dmesg "
+                   "and test_log files that the archive omits")
 @click.option("--pretty", is_flag=True, help="Pretty-print JSON")
 def logs(
     test_set_id: str,
     output_dir: str | None,
     grep_pattern: str | None,
+    test_logs: bool,
     pretty: bool,
 ) -> None:
     """Download and extract test logs for a test set (suite).
@@ -1724,6 +1728,7 @@ def logs(
       maloo logs <test_set_id>
       maloo logs <test_set_id> --grep "test_81a"
       maloo logs <test_set_id> --output-dir /tmp/my_logs
+      maloo logs <test_set_id> --test-logs
     """
     if output_dir is None:
         output_dir = os.path.join(
@@ -1739,6 +1744,22 @@ def logs(
         return
 
     extracted_files = _extract_archive(data, output_dir, test_set_id)
+
+    if test_logs:
+        try:
+            have = {os.path.basename(f) for f in extracted_files}
+            for item in client.list_test_logs(test_set_id):
+                if item["name"] in have:
+                    continue
+                dest = os.path.join(
+                    output_dir, os.path.basename(item["name"])
+                )
+                with open(dest, "wb") as fh:
+                    fh.write(client.download_test_log(item["id"]))
+                extracted_files.append(dest)
+        except Exception as exc:
+            _error(ErrorCode.DOWNLOAD_FAILED, str(exc), "logs", pretty)
+            return
 
     # Optional grep
     grep_results: list[dict[str, Any]] = []
