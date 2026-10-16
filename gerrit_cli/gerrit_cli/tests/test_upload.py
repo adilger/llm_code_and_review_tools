@@ -493,7 +493,10 @@ def test_foreign_signoff_refused_before_anything_is_rewritten(gerrit):
 FOREIGN = ("Someone Else", "else@example.com")
 
 
-def test_a_commit_on_an_earlier_patchset_of_its_change_is_refused(gerrit):
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_commit_on_an_earlier_patchset_of_its_change_is_refused(
+    gerrit, dry_run
+):
     fake, bare, work = gerrit
     patchset = commit(work, "LU-1 llite: the change", cid=CID_A,
                       committer=BOT)
@@ -502,7 +505,8 @@ def test_a_commit_on_an_earlier_patchset_of_its_change_is_refused(gerrit):
                   committer=BOT)
 
     with pytest.raises(UploadError) as err:
-        upload(fake, repo=str(work), change="51164", expect_patchset=2)
+        upload(fake, repo=str(work), change="51164", expect_patchset=2,
+               dry_run=dry_run)
 
     e = err.value
     assert e.code == ErrorCode.DUPLICATE_CHANGE_ID

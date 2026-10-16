@@ -105,7 +105,7 @@ _HOISTABLE_FLAGS = {"--pretty", "--debug", "--envelope"}
 _HOISTABLE_OPTIONS = {"--instance", "-I", "-U"}
 
 # Names agents reach for that mean an existing command; hidden from --help.
-_COMMAND_ALIASES = {"view": "get"}
+_COMMAND_ALIASES = {"view": "get", "show": "get"}
 
 
 class JsonErrorGroup(JsonUsageErrorGroup):
