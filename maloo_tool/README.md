@@ -87,6 +87,8 @@ maloo queue --review 54225
 # Download test logs (optionally grep inside)
 maloo logs <test_set-UUID>
 maloo logs <test_set-UUID> --grep "test_81a"
+# Add the per-test debug_log (lctl dk), dmesg and test_log files
+maloo logs <test_set-UUID> --test-logs
 ```
 
 ## Output Format
@@ -156,7 +158,7 @@ follow-up commands.)
 
 | Command | Description |
 |---------|-------------|
-| `maloo logs <test_set-UUID>` | Download and extract test logs (optionally `--grep PATTERN`) |
+| `maloo logs <test_set-UUID>` | Download and extract test logs (optionally `--grep PATTERN`). `--test-logs` also fetches the per-test `debug_log`, `dmesg` and `test_log` files, which the archive omits |
 
 ## LLM Context Awareness
 

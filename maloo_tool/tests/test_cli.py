@@ -1181,6 +1181,30 @@ class TestLogs:
         assert env["data"]["test_set_id"] == TSID_1
         assert len(env["data"]["files"]) >= 1
 
+    def test_logs_test_logs_flag(self, runner, mock_client, tmp_path):
+        """--test-logs adds per-test files, skips ones in the archive."""
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("console.n1.log", "x\n")
+        mock_client.download_logs.return_value = buf.getvalue()
+        mock_client.list_test_logs.return_value = [
+            {"name": "console.n1.log", "id": "a"},
+            {"name": "s.test_1.debug_log.n1.1.log", "id": "b"},
+        ]
+        mock_client.download_test_log.return_value = b"dk\n"
+
+        result = runner.invoke(main, [
+            "--envelope", "logs", TSID_1, "--test-logs",
+            "--output-dir", str(tmp_path)])
+        env = _parse_output(result)
+        names = [f["name"] for f in env["data"]["files"]]
+        assert names == ["console.n1.log", "s.test_1.debug_log.n1.1.log"]
+        mock_client.download_test_log.assert_called_once_with("b")
+        assert (tmp_path / "s.test_1.debug_log.n1.1.log").read_bytes() == b"dk\n"
+
     def test_logs_download_error(self, runner, mock_client):
         """Logs command should handle download failures."""
         mock_client.download_logs.side_effect = Exception("connection timeout")
