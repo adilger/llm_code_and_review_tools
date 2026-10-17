@@ -28,7 +28,7 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 # Agents that take a reasoning effort at all
-EFFORT_AGENTS = ("claude", "codex")
+EFFORT_AGENTS = ("claude", "codex", "auggie")
 
 
 @dataclass(frozen=True)

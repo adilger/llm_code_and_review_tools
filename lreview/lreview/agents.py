@@ -118,6 +118,15 @@ class AgentSpec:
             if model:
                 cmd += ["-m", model]
             return cmd + extra_args + ["-p", prompt_text]
+        if self.name == "auggie":
+            cmd = ["auggie", "--print", "--output-format", "json", "--show-cost",
+                   "--log-file", "-", "--log-level", "info",
+                   "--permission", "launch-process:allow"]
+            if model:
+                cmd += ["--model", model]
+            if effort:
+                cmd += ["--reasoning-effort", effort]
+            return cmd + extra_args + [prompt_text]
         if self.name == "opencode":
             cmd = ["opencode", "run"]
             if model:
@@ -177,6 +186,13 @@ class AgentSpec:
             if model:
                 cmd += ["-m", model]
             return cmd + extra_args + ["-i", prompt_text]
+        if self.name == "auggie":
+            cmd = ["auggie"]
+            if model:
+                cmd += ["--model", model]
+            if effort:
+                cmd += ["--reasoning-effort", effort]
+            return cmd + extra_args + [prompt_text]
         if self.name == "opencode":
             # The root command's positional argument is a project
             # PATH, not a prompt — the prompt goes in --prompt,
@@ -204,6 +220,7 @@ def claude_session_exists(session_id: str) -> bool:
 AGENTS = {
     "claude": AgentSpec(name="claude", stream_json=True),
     "codex": AgentSpec(name="codex", stream_json=True),
+    "auggie": AgentSpec(name="auggie", stream_json=True, verified=False),
     "gemini": AgentSpec(name="gemini", verified=False),
     "opencode": AgentSpec(name="opencode", verified=False),
 }

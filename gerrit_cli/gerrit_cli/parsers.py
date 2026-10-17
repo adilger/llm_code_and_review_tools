@@ -1508,6 +1508,9 @@ def setup_parsers(subparsers, handlers):
     Returns:
         None - parsers are added to subparsers in-place
     """
+    check = subparsers.add_parser("check", help="Check Gerrit configuration and authentication without publishing")
+    check.add_argument("--offline", action="store_true", help="Report the configuration file location without network access")
+    check.set_defaults(func=handlers['check'])
     # Core comment commands
     add_extract_parser(subparsers).set_defaults(func=handlers['comments'])
     add_reply_parser(subparsers).set_defaults(func=handlers['reply'])

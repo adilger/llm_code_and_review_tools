@@ -8,6 +8,24 @@ from ._helpers import _cli, error_code_for, output_error, output_success
 
 # Command explanations with detailed usage and examples
 COMMAND_EXPLANATIONS = {
+    "check": {
+        "summary": "Check Gerrit configuration and authentication",
+        "description": """
+Check authentication with a read-only GET /accounts/self request and a
+10-second network timeout. The result reports the active configuration file
+and a sanitized status; it never returns credentials or publishes comments.
+Successful authentication does not establish project publishing permissions.
+
+Use --offline to locate the configuration file without contacting Gerrit.
+Exit codes: 0 success, 2 missing or rejected authentication, 4 invalid server
+URL, 5 connection failure, and 1 other failures.
+""",
+        "examples": [
+            {"command": "gc check", "description": "Verify Gerrit authentication"},
+            {"command": "gc check --offline", "description": "Locate the CLI configuration without network access"},
+        ],
+        "related": ["info", "review"],
+    },
     "comments": {
         "summary": "Get unresolved comments from a Gerrit change",
         "description": """

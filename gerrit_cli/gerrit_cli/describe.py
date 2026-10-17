@@ -120,6 +120,13 @@ def get_tool_description() -> ToolDescription:
             {"name": "GERRIT_PASS", "description": "Gerrit HTTP password", "required": "true"},
         ],
         commands=[
+            Command(
+                name="check",
+                description="Check configuration and authentication using a read-only account request; does not verify project publishing permissions",
+                usage="gc check [--offline]",
+                arguments=[Argument(name="--offline", description="Report the configuration file location without network access", type="boolean", default=False)],
+                output_fields=["status", "message", "authenticated", "config_file", "config_exists"],
+            ),
             # --- Core comment commands ---
             Command(
                 name="comments",

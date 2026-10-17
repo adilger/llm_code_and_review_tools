@@ -147,6 +147,7 @@ from .commands import reviewers as _cmd_reviewers
 from .commands import meta as _cmd_meta
 from .commands import reintegration as _cmd_reintegration
 from .commands import upload as _cmd_upload
+from .commands.check import cmd_check
 
 # ---------------------------------------------------------------------------
 # Re-export every cmd_* handler from the commands modules.
@@ -348,6 +349,7 @@ def build_handlers():
     added here cannot be missed by the tests that check this contract.
     """
     return {
+        'check': cmd_check,
         'comments': cmd_extract,
         'reply': cmd_reply,
         'batch': cmd_batch_reply,

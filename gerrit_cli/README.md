@@ -19,6 +19,15 @@ export GERRIT_PASS="your-http-password"
 
 If `gerrit-cli` is not found after install, add `$HOME/.local/bin` to PATH.
 
+`gerrit check` checks authentication using only `GET /accounts/self` (10-second
+network timeout). It reports the configuration file location and a sanitized
+status; it never publishes comments or returns credentials. A successful check
+confirms authentication, not permission to publish in every project.
+`gerrit check --offline` reports the file location without a network request.
+Exit codes: 0 success, 2 missing/rejected authentication, 4 invalid server URL,
+5 connection failure, 1 other failures. Failures use the normal JSON error
+object, with the diagnostic result in `details` (`error.details` with `--envelope`).
+
 ## Output Format
 
 All commands print the JSON data payload by default (on errors, the
