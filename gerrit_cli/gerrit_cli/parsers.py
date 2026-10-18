@@ -732,8 +732,12 @@ def add_reviewers_parser(subparsers):
     """Add the 'reviewers' subcommand parser."""
     parser = subparsers.add_parser(
         "reviewers",
-        help="List reviewers on a change",
-        description="Show all reviewers and their votes on a Gerrit change.",
+        help="List reviewers and CCs on a change, with role and activity",
+        description="Show everyone on a Gerrit change, reviewers and CCs: "
+                    "role, when added, standing votes, whether they voted "
+                    "on the current patchset, and their last message or "
+                    "inline comment. 'gc explain reviewers' describes "
+                    "each field.",
     )
     parser.add_argument("url", help="Gerrit change URL, number or Change-Id")
     parser.add_argument(

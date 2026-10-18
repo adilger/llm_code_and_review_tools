@@ -435,7 +435,7 @@ watch <json-file>                # Check CI status on watched patches
 ```bash
 add-reviewer <URL> "Name"        # Add a reviewer to a change
 remove-reviewer <URL> "Name"     # Remove a reviewer from a change
-reviewers <URL>                  # List reviewers on a change
+reviewers <URL>                  # Reviewers and CCs: role, votes, last activity
 find-user "name"                 # Search Gerrit users (fuzzy match)
 ```
 

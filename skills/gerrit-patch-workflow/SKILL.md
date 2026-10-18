@@ -189,6 +189,17 @@ gc find-user <name>                  gc remove-reviewer <url> <name>
 `add-reviewer` and `find-user` do fuzzy name matching -- confirm the match
 before adding someone to a change.
 
+`reviewers` lists everyone on the change, CCs included: tell them apart by
+`role` (`REVIEWER` or `CC`), and skip `service_user` accounts (Gerrit's
+bots) and the `owner`. Per person it gives `added_at` (when they took the
+role they hold now), `votes` standing on the current patchset,
+`copied_votes` (the ones Gerrit carried forward from an earlier
+patchset), `voted_on_current_patchset`, `last_vote`, and `last_activity`:
+their latest message or inline comment, with date, patchset and text.
+People taken off the change are under `removed`. To judge whether a
+reviewer has gone quiet, read those fields rather than parsing `info` and
+`comments --all`; `gc explain reviewers` defines each one.
+
 ## Lustre commit-message rules
 
 These are enforced by the tree's `commit-msg` hook, and a patch that

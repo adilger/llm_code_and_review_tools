@@ -1,5 +1,6 @@
 """Reviewer management commands: reviewers, add-reviewer, remove-reviewer, find-user."""
 
+import re
 import sys
 
 from ..errors import ErrorCode, ExitCode
@@ -26,8 +27,150 @@ def reviewer_since(updates):
     return {account: (since, by) for account, (_state, since, by) in current.items()}
 
 
+# One call for roles, dates, votes and messages.
+_DETAIL_OPTIONS = [
+    "DETAILED_LABELS", "DETAILED_ACCOUNTS", "REVIEWER_UPDATES", "MESSAGES",
+    "CURRENT_REVISION",
+]
+_VOTE_HEADER = re.compile(r"^(?:Patch Set|Uploaded patch set) \d+:(.*?)\.?$")
+_SNIPPET = 160
+
+
+def message_votes(text, labels):
+    """{label: value} a change message's first line cast; 0 is a removal."""
+    match = _VOTE_HEADER.match((text or "").split("\n", 1)[0])
+    votes = {}
+    for token in (match.group(1).split() if match else ()):
+        cast = re.fullmatch(r"([A-Za-z][\w-]*?)([+-]\d+)", token)
+        if cast and cast.group(1) in labels:
+            votes[cast.group(1)] = int(cast.group(2))
+            continue
+        removed = re.fullmatch(r"-([A-Za-z][\w-]*)", token)
+        if removed and removed.group(1) in labels:
+            votes[removed.group(1)] = 0
+    return votes
+
+
+def _snippet(text):
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= _SNIPPET else flat[:_SNIPPET - 3] + "..."
+
+
+def _person(account):
+    return {
+        "account_id": account.get("_account_id"),
+        "name": account.get("name", ""),
+        "email": account.get("email", ""),
+        "username": account.get("username", ""),
+    }
+
+
+def reviewer_activity(change, comments):
+    """{account_id: fields}: each account's role, standing votes, whether
+    they were cast on the current patchset, and its latest message or
+    inline comment on the change.
+
+    Gerrit's timestamps are UTC in one fixed format, so the latest is the
+    greatest string.
+    """
+    labels = change.get("labels") or {}
+    revisions = change.get("revisions") or {}
+    current = (revisions.get(change.get("current_revision") or "") or {}).get("_number")
+    owner = (change.get("owner") or {}).get("_account_id")
+    attention = {str(key) for key in (change.get("attention_set") or {})}
+
+    people = {}
+
+    def entry(account_id):
+        return people.setdefault(account_id, {
+            "role": None, "votes": {}, "last_cast": {}, "last_vote": None,
+            "last_activity": None, "message_count": 0, "comment_count": 0,
+        })
+
+    for role in ("REVIEWER", "CC"):
+        for account in (change.get("reviewers") or {}).get(role) or []:
+            entry(account.get("_account_id"))["role"] = role
+
+    for label, info in labels.items():
+        for vote in (info or {}).get("all") or []:
+            if vote.get("value") not in (None, 0):
+                entry(vote.get("_account_id"))["votes"][label] = vote["value"]
+
+    def note(person, activity):
+        latest = person["last_activity"]
+        if latest is None or activity["date"] >= latest["date"]:
+            person["last_activity"] = activity
+
+    for message in change.get("messages") or []:
+        account = (message.get("author") or {}).get("_account_id")
+        if account is None:
+            continue
+        person = entry(account)
+        date = str(message.get("date") or "")
+        patchset = message.get("_revision_number")
+        person["message_count"] += 1
+        note(person, {"kind": "message", "date": date, "patchset": patchset,
+                      "tag": message.get("tag"),
+                      "text": _snippet(message.get("message"))})
+        cast = message_votes(message.get("message"), labels)
+        if cast:
+            for label in cast:
+                person["last_cast"][label] = patchset
+            if person["last_vote"] is None or date >= person["last_vote"]["date"]:
+                person["last_vote"] = {"date": date, "patchset": patchset,
+                                       "labels": cast}
+
+    for path, thread in (comments or {}).items():
+        for comment in thread or []:
+            account = (comment.get("author") or {}).get("_account_id")
+            if account is None:
+                continue
+            person = entry(account)
+            person["comment_count"] += 1
+            note(person, {"kind": "comment",
+                          "date": str(comment.get("updated") or ""),
+                          "patchset": comment.get("patch_set"),
+                          "file": path, "line": comment.get("line"),
+                          "text": _snippet(comment.get("message"))})
+
+    found = {}
+    for account, person in people.items():
+        last_cast = person.pop("last_cast")
+        copied = sorted(label for label in person["votes"]
+                        if last_cast.get(label, current) != current)
+        found[account] = dict(
+            person,
+            owner=account == owner,
+            in_attention_set=str(account) in attention,
+            has_current_vote=bool(person["votes"]),
+            copied_votes=copied,
+            voted_on_current_patchset=len(copied) < len(person["votes"]),
+        )
+    return current, found
+
+
+def reviewer_removals(updates):
+    """{account_id: (removed_at, removed_by, account)} for each account whose
+    last reviewer update took it off the change."""
+    last = {}
+    for update in sorted(updates, key=lambda item: str(item.get("updated") or "")):
+        account = (update.get("reviewer") or {}).get("_account_id")
+        if account is not None:
+            last[account] = update
+    removed = {}
+    for account, update in last.items():
+        if update.get("state") == "REMOVED":
+            by = update.get("updated_by") or {}
+            removed[account] = (
+                str(update.get("updated") or ""),
+                by.get("username") or by.get("name") or by.get("_account_id"),
+                update.get("reviewer") or {},
+            )
+    return removed
+
+
 def cmd_reviewers(args):
-    """List reviewers on a change."""
+    """List reviewers and CCs on a change, with role, votes and activity."""
     cli = _cli()
     command = "reviewers"
     pretty = getattr(args, 'pretty', False)
@@ -37,24 +180,38 @@ def cmd_reviewers(args):
         client = cli.GerritCommentsClient()
         reviewers = client.get_reviewers(change_number)
         try:
-            joined = reviewer_since(client.get_reviewer_updates(change_number))
+            change = client.get_change(change_number, options=_DETAIL_OPTIONS)
         except Exception:
-            joined = None
+            change = None
+        comments, comments_ok = {}, True
+        if change is not None:
+            try:
+                comments = client.get_comments(change_number) or {}
+            except Exception:
+                comments_ok = False
+        if change is not None:
+            updates = change.get("reviewer_updates") or []
+            joined = reviewer_since(updates)
+            current, activity = reviewer_activity(change, comments)
+        else:
+            joined, current, activity = None, None, {}
 
-        # Format reviewer data
         reviewer_list = []
         for r in reviewers:
-            reviewer_info = {
-                "account_id": r.get("_account_id"),
-                "name": r.get("name", ""),
-                "email": r.get("email", ""),
-                "username": r.get("username", ""),
-                "approvals": r.get("approvals", {}),
-            }
-            if joined is not None:
-                added_at, added_by = joined.get(r.get("_account_id"), (None, None))
+            reviewer_info = dict(_person(r), approvals=r.get("approvals", {}))
+            if change is not None:
+                account = r.get("_account_id")
+                added_at, added_by = joined.get(account, (None, None))
                 reviewer_info["added_at"] = added_at
                 reviewer_info["added_by"] = added_by
+                reviewer_info["service_user"] = "SERVICE_USER" in (r.get("tags") or [])
+                reviewer_info.update(activity.get(account) or {
+                    "role": None, "votes": {}, "last_vote": None,
+                    "last_activity": None, "message_count": 0,
+                    "comment_count": 0, "owner": False,
+                    "in_attention_set": False, "has_current_vote": False,
+                    "copied_votes": [], "voted_on_current_patchset": False,
+                })
             reviewer_list.append(reviewer_info)
 
         data = {
@@ -62,6 +219,21 @@ def cmd_reviewers(args):
             "reviewers": reviewer_list,
             "count": len(reviewer_list),
         }
+        if change is not None:
+            data["current_patchset"] = current
+            data["reviewer_count"] = sum(
+                1 for r in reviewer_list if r["role"] == "REVIEWER")
+            data["cc_count"] = sum(1 for r in reviewer_list if r["role"] == "CC")
+            listed = {r["account_id"] for r in reviewer_list}
+            data["removed"] = [
+                dict(_person(account), removed_at=at, removed_by=by,
+                     last_activity=(activity.get(account_id) or {}).get("last_activity"))
+                for account_id, (at, by, account)
+                in reviewer_removals(change.get("reviewer_updates") or []).items()
+                if account_id not in listed
+            ]
+            if not comments_ok:
+                data["inline_comments_unavailable"] = True
 
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)

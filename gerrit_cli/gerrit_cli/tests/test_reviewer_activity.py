@@ -1,0 +1,214 @@
+"""`gerrit reviewers` says who is a reviewer and who a CC, and what each did.
+
+Five reviewer searches asked for it: `reviewers` listed CCs with reviewers
+and gave no activity, so runs were handed the Reviewer-role list and parsed
+`info` and comments themselves to see who had voted or written lately.
+"""
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from gerrit_cli import cli
+from gerrit_cli.commands.reviewers import (
+    cmd_reviewers, message_votes, reviewer_activity,
+)
+
+LABELS = {"Code-Review": {}, "Verified": {}}
+
+OWNER = {"_account_id": 5, "name": "Marc Vef", "username": "mvef"}
+ANDREAS = {"_account_id": 1, "name": "Andreas Dilger", "username": "adilger"}
+BOBIJAM = {"_account_id": 3, "name": "Zhenyu Xu", "username": "bobijam"}
+AIREVIEW = {"_account_id": 7, "name": "AI review", "username": "aireview"}
+JENKINS = {"_account_id": 8, "name": "jenkins", "username": "jenkins",
+           "tags": ["SERVICE_USER"]}
+OLEG = {"_account_id": 2, "name": "Oleg Drokin", "username": "green"}
+
+
+def _message(author, when, patchset, text):
+    return {"author": author, "date": f"2026-10-{when} 10:00:00.000000000",
+            "_revision_number": patchset, "message": text}
+
+
+CHANGE = {
+    "owner": OWNER,
+    "current_revision": "c",
+    "revisions": {"b": {"_number": 3}, "c": {"_number": 4}},
+    "attention_set": {"3": {"account": BOBIJAM}},
+    "reviewers": {
+        "REVIEWER": [OWNER, ANDREAS, BOBIJAM, JENKINS],
+        "CC": [AIREVIEW],
+        "REMOVED": [OLEG],
+    },
+    "labels": {
+        "Code-Review": {"all": [
+            dict(ANDREAS, value=1, date="2026-10-04 10:00:00.000000000"),
+            dict(BOBIJAM, value=0),
+            dict(OWNER, value=0),
+        ]},
+        "Verified": {"all": [dict(JENKINS, value=1)]},
+    },
+    "reviewer_updates": [
+        {"updated": "2026-10-01 10:00:00.000000000", "updated_by": OWNER,
+         "reviewer": ANDREAS, "state": "REVIEWER"},
+        {"updated": "2026-10-01 10:00:00.000000000", "updated_by": OWNER,
+         "reviewer": OLEG, "state": "REVIEWER"},
+        {"updated": "2026-10-02 10:00:00.000000000", "updated_by": OWNER,
+         "reviewer": OLEG, "state": "REMOVED"},
+        {"updated": "2026-10-03 10:00:00.000000000", "updated_by": OWNER,
+         "reviewer": BOBIJAM, "state": "REVIEWER"},
+        {"updated": "2026-10-03 11:00:00.000000000", "updated_by": AIREVIEW,
+         "reviewer": AIREVIEW, "state": "CC"},
+    ],
+    "messages": [
+        _message(OWNER, "01", 1, "Uploaded patch set 1."),
+        _message(OLEG, "02", 1, "Patch Set 1:\n\nNot me."),
+        _message(ANDREAS, "02", 3, "Patch Set 3: Code-Review+1\n\nLooks right."),
+        _message(JENKINS, "04", 4, "Patch Set 4: Verified+1\n\nBuild Successful"),
+        _message(ANDREAS, "05", 4, "Patch Set 4:\n\n(1 comment)"),
+        _message(AIREVIEW, "06", 4, "Patch Set 4: Code-Review-1"),
+        _message(AIREVIEW, "07", 4, "Patch Set 4: -Code-Review"),
+    ],
+}
+
+COMMENTS = {
+    "lustre/llite/file.c": [
+        {"author": ANDREAS, "updated": "2026-10-05 10:00:00.000000000",
+         "patch_set": 4, "line": 120, "message": "Why   not\nll_foo()?"},
+    ],
+}
+
+
+def test_message_votes_reads_only_label_votes_from_the_first_line():
+    assert message_votes("Patch Set 4: Code-Review+1 Verified-1\n\nok",
+                         LABELS) == {"Code-Review": 1, "Verified": -1}
+    assert message_votes("Patch Set 4: -Code-Review", LABELS) == {"Code-Review": 0}
+    assert message_votes("Uploaded patch set 2: Verified+1.", LABELS) == {"Verified": 1}
+    assert message_votes("Patch Set 2: Commit message was updated.", LABELS) == {}
+    assert message_votes("Patch Set 2:\n\nCode-Review+1 would be nice", LABELS) == {}
+    assert message_votes("Patch Set 2: Something+1", LABELS) == {}
+
+
+def test_activity_tells_a_copied_vote_from_one_cast_on_this_patchset():
+    current, people = reviewer_activity(CHANGE, COMMENTS)
+    assert current == 4
+    andreas = people[1]
+    assert andreas["role"] == "REVIEWER"
+    assert andreas["votes"] == {"Code-Review": 1}
+    # Cast on patchset 3 and carried to 4 by Gerrit.
+    assert andreas["copied_votes"] == ["Code-Review"]
+    assert andreas["has_current_vote"] is True
+    assert andreas["voted_on_current_patchset"] is False
+    assert andreas["last_vote"] == {"date": "2026-10-02 10:00:00.000000000",
+                                    "patchset": 3, "labels": {"Code-Review": 1}}
+    jenkins = people[8]
+    assert jenkins["votes"] == {"Verified": 1}
+    assert jenkins["voted_on_current_patchset"] is True
+    assert jenkins["copied_votes"] == []
+
+
+def test_last_activity_is_the_latest_message_or_inline_comment():
+    _current, people = reviewer_activity(CHANGE, COMMENTS)
+    andreas = people[1]
+    # The inline comment and its "(1 comment)" message carry the same date;
+    # the comment says more.
+    assert andreas["last_activity"] == {
+        "kind": "comment", "date": "2026-10-05 10:00:00.000000000",
+        "patchset": 4, "file": "lustre/llite/file.c", "line": 120,
+        "text": "Why not ll_foo()?",
+    }
+    assert andreas["message_count"] == 2
+    assert andreas["comment_count"] == 1
+    # A removed vote is still the latest vote, and leaves none standing.
+    ai = people[7]
+    assert ai["role"] == "CC"
+    assert ai["last_vote"]["labels"] == {"Code-Review": 0}
+    assert ai["votes"] == {}
+    assert ai["has_current_vote"] is False
+    # Asked, never answered.
+    bobijam = people[3]
+    assert bobijam["last_activity"] is None
+    assert bobijam["in_attention_set"] is True
+    assert people[5]["owner"] is True
+
+
+class FakeClient:
+    def __init__(self, change=CHANGE, comments_fail=False):
+        self.change = change
+        self.comments_fail = comments_fail
+
+    @staticmethod
+    def parse_gerrit_url(url):
+        return "https://review.whamcloud.com", 68747
+
+    def get_reviewers(self, change_number):
+        return [
+            dict(OWNER, approvals={"Code-Review": " 0"}),
+            dict(ANDREAS, approvals={"Code-Review": "+1"}),
+            dict(BOBIJAM, approvals={"Code-Review": " 0"}),
+            dict(JENKINS, approvals={"Verified": "+1"}),
+            dict(AIREVIEW, approvals={"Code-Review": " 0"}),
+        ]
+
+    def get_change(self, change_number, options=None):
+        assert "REVIEWER_UPDATES" in options and "MESSAGES" in options
+        return self.change
+
+    def get_comments(self, change_number):
+        if self.comments_fail:
+            raise RuntimeError("no comments")
+        return COMMENTS
+
+
+def _run(monkeypatch, capsys, client):
+    monkeypatch.setattr(cli, "GerritCommentsClient", lambda *a, **k: client)
+    monkeypatch.setattr(cli.GerritCommentsClient, "parse_gerrit_url",
+                        FakeClient.parse_gerrit_url, raising=False)
+    with pytest.raises(SystemExit) as done:
+        cmd_reviewers(SimpleNamespace(url="68747", pretty=False))
+    assert done.value.code == 0
+    out = json.loads(capsys.readouterr().out)
+    return out.get("data", out)
+
+
+def test_reviewers_output_keeps_the_old_fields_and_adds_role_and_activity(
+    monkeypatch, capsys,
+):
+    data = _run(monkeypatch, capsys, FakeClient())
+    assert data["count"] == 5
+    assert data["current_patchset"] == 4
+    assert data["reviewer_count"] == 4
+    assert data["cc_count"] == 1
+    by_name = {r["username"]: r for r in data["reviewers"]}
+    andreas = by_name["adilger"]
+    for old in ("account_id", "name", "email", "username", "approvals",
+                "added_at", "added_by"):
+        assert old in andreas
+    assert andreas["approvals"] == {"Code-Review": "+1"}
+    assert andreas["added_at"] == "2026-10-01 10:00:00.000000000"
+    assert andreas["role"] == "REVIEWER"
+    assert andreas["last_activity"]["kind"] == "comment"
+    assert by_name["aireview"]["role"] == "CC"
+    assert by_name["jenkins"]["service_user"] is True
+    assert by_name["adilger"]["service_user"] is False
+    # Oleg was removed: not among the reviewers, listed apart.
+    assert "green" not in by_name
+    assert data["removed"] == [{
+        "account_id": 2, "name": "Oleg Drokin", "email": "",
+        "username": "green", "removed_at": "2026-10-02 10:00:00.000000000",
+        "removed_by": "mvef",
+        "last_activity": {"kind": "message",
+                          "date": "2026-10-02 10:00:00.000000000",
+                          "patchset": 1, "tag": None,
+                          "text": "Patch Set 1: Not me."},
+    }]
+    assert "inline_comments_unavailable" not in data
+
+
+def test_reviewers_still_answers_without_inline_comments(monkeypatch, capsys):
+    data = _run(monkeypatch, capsys, FakeClient(comments_fail=True))
+    assert data["inline_comments_unavailable"] is True
+    andreas = {r["username"]: r for r in data["reviewers"]}["adilger"]
+    assert andreas["last_activity"]["kind"] == "message"
+    assert andreas["comment_count"] == 0

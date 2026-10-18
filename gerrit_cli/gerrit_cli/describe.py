@@ -412,13 +412,28 @@ def get_tool_description() -> ToolDescription:
             # --- Reviewer management ---
             Command(
                 name="reviewers",
-                description="List reviewers and their votes on a change",
+                description="List reviewers and CCs on a change: role, when added, votes and last activity",
                 usage="gc reviewers <URL>",
                 arguments=[
                     Argument(name="url", description="Gerrit change URL, number or Change-Id", required=True),
                 ],
                 examples=["gc reviewers 12345"],
-                output_fields=["reviewers[].name", "reviewers[].username", "reviewers[].votes"],
+                output_fields=[
+                    "change_number", "current_patchset", "count",
+                    "reviewer_count", "cc_count",
+                    "reviewers[].account_id", "reviewers[].name",
+                    "reviewers[].email", "reviewers[].username",
+                    "reviewers[].role", "reviewers[].service_user",
+                    "reviewers[].owner", "reviewers[].approvals",
+                    "reviewers[].added_at", "reviewers[].added_by",
+                    "reviewers[].votes", "reviewers[].has_current_vote",
+                    "reviewers[].copied_votes",
+                    "reviewers[].voted_on_current_patchset",
+                    "reviewers[].last_vote", "reviewers[].last_activity",
+                    "reviewers[].message_count", "reviewers[].comment_count",
+                    "reviewers[].in_attention_set",
+                    "removed[]", "inline_comments_unavailable",
+                ],
                 next_actions=["add-reviewer", "remove-reviewer"],
             ),
             Command(

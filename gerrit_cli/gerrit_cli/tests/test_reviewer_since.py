@@ -52,10 +52,13 @@ class FakeClient:
     def get_reviewers(self, change_number):
         return [dict(ANDREAS, approvals={"Code-Review": "0"}), dict(OLEG, approvals={})]
 
-    def get_reviewer_updates(self, change_number):
+    def get_change(self, change_number, options=None):
         if self.fail:
-            raise RuntimeError("no reviewer updates")
-        return UPDATES
+            raise RuntimeError("no change detail")
+        return {"reviewer_updates": UPDATES}
+
+    def get_comments(self, change_number):
+        return {}
 
 
 @pytest.mark.parametrize("fail", [False, True])
