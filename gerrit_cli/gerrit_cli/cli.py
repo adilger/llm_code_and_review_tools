@@ -327,6 +327,33 @@ class _JsonErrorParser(argparse.ArgumentParser):
     that every argument error produces structured JSON output.
     """
 
+    _intermixing = False
+
+    def _wants_intermixed(self) -> bool:
+        """True for a command with an optional positional after another.
+
+        Plain argparse ends the positionals at the first option, so
+        `gc reply 15 --url URL "text"` matched no message and then
+        refused "text". Intermixed parsing takes the positionals wherever
+        they fall.
+        """
+        if any(isinstance(a, argparse._SubParsersAction) for a in self._actions):
+            return False
+        positionals = self._get_positional_actions()
+        if any(a.nargs in (argparse.PARSER, argparse.REMAINDER)
+               for a in positionals):
+            return False
+        return any(a.nargs in ("?", "*") for a in positionals[1:])
+
+    def parse_known_args(self, args=None, namespace=None):
+        if self._intermixing or not self._wants_intermixed():
+            return super().parse_known_args(args, namespace)
+        self._intermixing = True
+        try:
+            return self.parse_known_intermixed_args(args, namespace)
+        finally:
+            self._intermixing = False
+
     def error(self, message: str) -> None:
         envelope = error_response_from_dict(
             ErrorCode.INVALID_INPUT,
