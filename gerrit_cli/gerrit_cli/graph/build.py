@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from ..client import GerritCommentsClient
@@ -223,6 +223,9 @@ class BuildContext:
     # (the original permissive behavior).
     cross_project_branch: bool = False
     logger: "PhaseLogger | None" = None
+    # The page opens showing only the tracked changes (hashtag/topic
+    # mode: they are what was asked for, there is no anchor of one's own).
+    focus_on_by_default: bool = False
 
     # Resolved from the anchor change during step 1.
     project: str = _DEFAULT_PROJECT
@@ -2289,6 +2292,7 @@ def _assemble_payload(ctx: BuildContext) -> dict[str, Any]:
     summary = series_summary(
         list(ctx.nodes.values()), generated_ts, bool(ctx.fetch_details),
     )
+    focus = _focus_stats(ctx, generated_ts)
     return {
         "anchor": ctx.change_number,
         "base_url": ctx.base_url,
@@ -2342,7 +2346,43 @@ def _assemble_payload(ctx: BuildContext) -> dict[str, Any]:
             # In-flight changes the series sits on that no search
             # found (_discover_inflight_ancestors); shown dimmed.
             **({"unrelated_parent_cns": unrelated_parents} if unrelated_parents else {}),
+            # Only the changes carrying a hashtag or topic that was
+            # asked for (_focus_stats); absent when none was.
+            **({"focus": focus} if focus else {}),
         },
+    }
+
+
+def in_focus(node: dict[str, Any], hashtags: list[str], topics: list[str]) -> bool:
+    return (bool(set(node.get("hashtags") or []) & set(hashtags))
+            or (bool(node.get("topic")) and node["topic"] in topics))
+
+
+def _focus_stats(ctx: BuildContext, generated_ts: int) -> dict[str, Any] | None:
+    """The numbers of the changes carrying a hashtag or topic that was
+    asked for (hashtag/topic mode, --include-hashtag, --include-topic),
+    beside the whole graph's. The anchor's own hashtags and topic do not
+    count: every anchor with a topic would get them, and its /related
+    chain is the series there, tagged or not."""
+    hashtags = list(dict.fromkeys(h for h in ctx.extra_hashtags if h))
+    topics = list(dict.fromkeys(t for t in ctx.extra_topics if t))
+    if not hashtags and not topics:
+        return None
+    members = [
+        n for n in ctx.nodes.values()
+        if in_focus(n, hashtags, topics)
+        and not n.get("trunk_structural") and not n.get("unrelated_parent")
+    ]
+    status_counts: dict[str, int] = {}
+    for n in members:
+        status_counts[n["status"]] = status_counts.get(n["status"], 0) + 1
+    return {
+        "hashtags": hashtags,
+        "topics": topics,
+        "on_by_default": ctx.focus_on_by_default,
+        "node_count": len(members),
+        "status_counts": status_counts,
+        "summary": series_summary(members, generated_ts, bool(ctx.fetch_details)),
     }
 
 
@@ -2486,10 +2526,26 @@ def resolve_ticket_anchor(
         )
         return pool[0]["_number"]
 
+    return _best_anchor(client, new_cands, lambda e: subject_ticket(
+        (e.get("commit") or {}).get("subject", "")) == ticket)
+
+
+def _best_anchor(
+    client: GerritCommentsClient,
+    new_cands: list[dict[str, Any]],
+    is_member: Callable[[dict[str, Any]], bool],
+    members_first: bool = False,
+    probes: int = 8,
+) -> int:
+    """The in-flight candidate whose /related series has the most
+    in-flight changes, then the most members, then the newest update;
+    with `members_first`, the most members, then the fewest other
+    changes. Only the `probes` most recently updated get a /related
+    probe."""
     new_cands.sort(key=lambda ch: ch.get("updated", ""), reverse=True)
     best_cn = None
     best_key: tuple[int, int, str] | None = None
-    for ch in new_cands[:8]:
+    for ch in new_cands[:probes]:
         cn = ch["_number"]
         try:
             rel = client.rest.get(
@@ -2498,17 +2554,57 @@ def resolve_ticket_anchor(
         except Exception:
             rel = []
         n_inflight = sum(1 for e in rel if e.get("status") == "NEW")
-        n_ticket = sum(
-            1 for e in rel
-            if subject_ticket(
-                (e.get("commit") or {}).get("subject", "")
-            ) == ticket
-        )
-        key = (n_inflight, n_ticket, ch.get("updated", ""))
+        n_members = sum(1 for e in rel if is_member(e))
+        key = ((n_members, -(len(rel) - n_members), ch.get("updated", "")) if members_first
+               else (n_inflight, n_members, ch.get("updated", "")))
         if best_key is None or key > best_key:
             best_key = key
             best_cn = cn
     return best_cn
+
+
+def resolve_search_anchor(
+    client: GerritCommentsClient,
+    kind: str,
+    value: str,
+    branch: str = "master",
+) -> int:
+    """Pick the anchor change for a hashtag- or topic-mode graph
+    (`kind` is "hashtag" or "topic"): the in-flight change carrying it
+    whose /related series holds the most changes carrying it and the
+    fewest others, else the newest merged one. The anchor's series gets
+    a deeper expansion than the rest, so this keeps what the graph pulls
+    in around the tagged changes small. The branch is constrained in the
+    query and re-checked on every candidate, as for a ticket."""
+    q = f'{kind}:"{value}" branch:{branch}'
+    try:
+        result = client.rest.get(
+            f"/changes/?q={quote(q, safe=':+ ')}&n=500"
+        )
+    except Exception as e:
+        raise ValueError(f"{kind} search failed for {value}: {e}")
+
+    def carries(ch: dict[str, Any]) -> bool:
+        if kind == "hashtag":
+            return value in (ch.get("hashtags") or [])
+        return ch.get("topic") == value
+
+    cands = [
+        ch for ch in result
+        if carries(ch) and ch.get("_number") and ch.get("branch") == branch
+    ]
+    if not cands:
+        raise ValueError(f"no changes on branch '{branch}' with {kind} {value}")
+    new_cands = [ch for ch in cands if ch.get("status") == "NEW"]
+    if not new_cands:
+        merged = [ch for ch in cands if ch.get("status") == "MERGED"] or cands
+        merged.sort(key=lambda ch: ch.get("submitted") or ch.get("updated") or "",
+                    reverse=True)
+        return merged[0]["_number"]
+    members = {ch["_number"] for ch in cands}
+    return _best_anchor(client, new_cands,
+                        lambda e: e.get("_change_number") in members,
+                        members_first=True, probes=50)
 
 
 def build_graph(
@@ -2526,6 +2622,7 @@ def build_graph(
     cross_project_branch: bool = False,
     name: str | None = None,
     conflicts_repo: str | None = None,
+    focus_on_by_default: bool = False,
 ) -> dict[str, Any]:
     """Build the full series graph with stale branch information.
 
@@ -2572,6 +2669,7 @@ def build_graph(
         extra_tickets=list(extra_tickets or []),
         cross_project_branch=cross_project_branch,
         logger=logger,
+        focus_on_by_default=focus_on_by_default,
     )
 
     logger.header(f"gerrit-cli graph / #{change_number}")

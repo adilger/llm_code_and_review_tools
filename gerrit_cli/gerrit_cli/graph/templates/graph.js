@@ -29,6 +29,68 @@ for (const n of (G.context_nodes || [])) nodeMap[n.id] = n;
 for (const e of (G.context_edges || [])) {
     (contextEdgesTo[e.to] = contextEdgesTo[e.to] || []).push(e);
 }
+// The hashtags/topics the graph was asked for (stats.focus, absent
+// otherwise). The "Hashtags/topics" picker ticks any of the graph's:
+// the changes with one of them stand out, the others fade, and the
+// header and the Stats tab count only them.
+const FOCUS = G.stats.focus || null;
+function tagKey(kind, value) {
+    return kind + ':' + value;
+}
+function tagName(key) {
+    const i = key.indexOf(':');
+    return (key.slice(0, i) === 'hashtag' ? '#' : 'topic ') + key.slice(i + 1);
+}
+const ASKED = new Set(FOCUS ? FOCUS.hashtags.map(h => tagKey('hashtag', h))
+    .concat(FOCUS.topics.map(t => tagKey('topic', t))) : []);
+// A series member: not a merged base kept for the trunk, not an
+// unrelated parent, not a stacks-view ancestor.
+function counted(node) {
+    return !node.trunk_structural && !node.unrelated_parent && !node.context;
+}
+// Every hashtag and topic in the graph with its number of series
+// members: the asked ones first (even when none carries them), then
+// the most common.
+const TAGS = (() => {
+    const seen = new Map();
+    const add = k => seen.set(k, (seen.get(k) || 0) + 1);
+    for (const n of G.nodes) {
+        if (!counted(n)) continue;
+        for (const h of n.hashtags || []) add(tagKey('hashtag', h));
+        if (n.topic) add(tagKey('topic', n.topic));
+    }
+    const others = [...seen.keys()].filter(k => !ASKED.has(k))
+        .sort((a, b) => (seen.get(b) - seen.get(a)) || (a < b ? -1 : a > b ? 1 : 0));
+    return [...ASKED].map(k => ({ key: k, asked: true, count: seen.get(k) || 0 }))
+        .concat(others.map(k => ({ key: k, asked: false, count: seen.get(k) })));
+})();
+// The ticked ones; none ticked = all changes.
+let tagSel = new Set(FOCUS && FOCUS.on_by_default ? ASKED : []);
+function focusOnly() {
+    return tagSel.size > 0;
+}
+function inSelection(node, sel = tagSel) {
+    if (!sel.size) return true;
+    return (node.hashtags || []).some(h => sel.has(tagKey('hashtag', h)))
+        || (!!node.topic && sel.has(tagKey('topic', node.topic)));
+}
+function selectionName(sel = tagSel) {
+    return TAGS.filter(t => sel.has(t.key)).map(t => tagName(t.key)).join(', ');
+}
+function focusTracked(node, sel = tagSel) {
+    return !!node && counted(node) && inSelection(node, sel);
+}
+function selectionCounts(sel = tagSel) {
+    const status_counts = {};
+    let node_count = 0;
+    for (const n of G.nodes) {
+        if (!focusTracked(n, sel)) continue;
+        node_count++;
+        status_counts[n.status] = (status_counts[n.status] || 0) + 1;
+    }
+    return { node_count, status_counts };
+}
+
 // parentOf follows the same ranking as the rendered incoming edge;
 // the anchor column, the main-chain walk and the info panel all
 // read it, and a history edge listed last in the payload must not
@@ -83,12 +145,67 @@ const breakdown = healthChips.length
     ? '<span class="health-breakdown">' + healthChips.join('') + '</span>'
     : '';
 
-document.getElementById('stats').innerHTML =
+const allRow =
     `<span class="badge badge-new"${unrelatedParents ? ` title="${inflight} in the series; ${unrelatedParents} unrelated in-flight parent(s) shown dimmed, not counted"` : ''}>In-flight: ${inflight}</span>`
   + breakdown
   + `<span class="badge badge-merged" title="${sc.MERGED || 0} series member(s) merged${(G.stats.structural_merged_count || 0) ? `; ${G.stats.structural_merged_count} unrelated merged patch(es) shown dimmed only as branch base` : ''}">MERGED: ${sc.MERGED || 0}${(G.stats.structural_merged_count || 0) ? ` +${G.stats.structural_merged_count} base` : ''}</span>`
   + `<span class="badge badge-abandoned">ABANDONED: ${sc.ABANDONED || 0}</span>`
   + `<span style="color:#8b949e;font-size:11px">${G.stats.node_count} changes</span>`;
+// With hashtags/topics ticked, the same row counts only their changes.
+function selectionRow() {
+    const st = selectionCounts();
+    const fc = st.status_counts;
+    const fh = { ready: 0, pending: 0, veto: 0, maloo: 0, jenkins: 0, other: 0 };
+    for (const n of G.nodes) {
+        if (n.status !== 'NEW' || !focusTracked(n)) continue;
+        const key = { good: 'ready', bad_veto: 'veto', bad_maloo: 'maloo',
+                      bad_jenkins: 'jenkins', bad_other: 'other' }[reviewHealth(n)] || 'pending';
+        fh[key]++;
+    }
+    const fchips = [['ready', 'ready', '#3fb950'], ['pending', 'pending', '#58a6ff'],
+        ['veto', 'CR veto', '#f85149'], ['maloo', 'Maloo', '#f85149'],
+        ['jenkins', 'Jenkins', '#e8a020'], ['other', 'other -1', '#d63384']]
+        .filter(([k]) => fh[k])
+        .map(([k, label, color]) => '<span class="health-chip" title="' + fh[k] + ' ' + label + '">'
+            + '<span class="health-dot" style="background:' + color + '"></span>'
+            + '<b>' + fh[k] + '</b> ' + label + '</span>');
+    return `<span class="badge badge-new">In-flight: ${fc.NEW || 0}</span>`
+      + (fchips.length ? '<span class="health-breakdown">' + fchips.join('') + '</span>' : '')
+      + `<span class="badge badge-merged">MERGED: ${fc.MERGED || 0}</span>`
+      + `<span class="badge badge-abandoned">ABANDONED: ${fc.ABANDONED || 0}</span>`
+      + `<span style="color:#8b949e;font-size:11px" title="the changes with ${esc(selectionName())}">${st.node_count} of ${G.stats.node_count} changes</span>`;
+}
+function renderStatsBar() {
+    document.getElementById('stats').innerHTML = focusOnly() ? selectionRow() : allRow;
+}
+renderStatsBar();
+
+// The picker's list: "All changes" clears it; the asked ones, then
+// the others in the graph.
+function renderTagMenu() {
+    const row = t => `<label class="tag-row"><input type="checkbox" data-key="${esc(t.key)}"${tagSel.has(t.key) ? ' checked' : ''}>`
+        + `<span class="tag-name">${esc(tagName(t.key))}</span><span class="tag-count">${t.count}</span></label>`;
+    const asked = TAGS.filter(t => t.asked), others = TAGS.filter(t => !t.asked);
+    const menu = document.getElementById('tag-menu');
+    const top = menu.scrollTop;
+    menu.innerHTML = '<div class="tag-acts"><button data-act="all">All changes</button></div>'
+        + (asked.length ? '<div class="tag-group">Asked for</div>' + asked.map(row).join('') : '')
+        + (others.length && asked.length ? '<div class="tag-group">Also in this graph</div>' : '')
+        + others.map(row).join('');
+    menu.scrollTop = top;
+    const name = selectionName();
+    const label = document.getElementById('tags-label');
+    label.textContent = name || 'all changes';
+    label.title = name;
+    document.getElementById('tag-pick').classList.toggle('on', focusOnly());
+}
+function setTagSelection(keys) {
+    tagSel = new Set(keys);
+    renderTagMenu();
+    onFocusToggle();
+}
+if (TAGS.length) renderTagMenu();
+else document.getElementById('tag-pick').style.display = 'none';
 
 if (G.generated_at) {
     document.getElementById('generated-at').textContent = 'Generated: ' + G.generated_at;
@@ -114,10 +231,12 @@ renderLegend();
 
 // ─── STATE ───
 // The anchor is fixed for the lifetime of the page. The underlying
-// data was fetched against G.anchor, so re-centering the layout on
-// a different node would show a partial view of a different series
-// — confusing more than helpful. Focus (Z) handles the "just center
-// this node on screen" case without touching layout.
+// data was fetched around it (in hashtag/topic mode around the
+// picked change; G.anchor is then the oldest merged change), so
+// re-centering the layout on a different node would show a partial
+// view of a different series — confusing more than helpful. Focus
+// (Z) handles the "just center this node on screen" case without
+// touching layout.
 const currentAnchor = G.anchor;
 let mainChain = new Set();
 // Nodes placed as historical base-chain context (below the anchor
@@ -1660,6 +1779,9 @@ function getColors() {
         edgeFontStale: '#d29922',
         edgeStroke: light ? '#ffffff' : '#0d1117',
         conflict: light ? '#cf222e' : '#ff4d4f',
+        // the label of a faded box: its own white would vanish on the
+        // light theme's pale box
+        fadedFont: light ? 'rgba(31,35,40,0.5)' : 'rgba(201,209,217,0.45)',
     };
 }
 
@@ -1860,6 +1982,13 @@ function nodeBaseColors(node, flags, C) {
     return C.STATUS[node.status] || C.STATUS.NEW;
 }
 
+// What is left of the box and edges of a change without any of the
+// ticked hashtags/topics.
+const FADE = 0.25;
+function withAlpha(hex, a) {
+    return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+}
+
 // Full vis.js node options for a rendered node.
 function styleForNode(node, flags, position, C) {
     let colors = nodeBaseColors(node, flags, C);
@@ -1907,8 +2036,10 @@ function styleForNode(node, flags, position, C) {
     }
 
     // Non-main nodes above the anchor dim slightly. Separate-series
-    // nodes are never dimmed — they render at full intensity.
-    const opacity = node.context ? 0.6 : (
+    // nodes are never dimmed — they render at full intensity. With
+    // hashtags/topics ticked, every change without one fades out.
+    const faded = focusOnly() && !focusTracked(node);
+    const opacity = faded ? FADE : node.context ? 0.6 : (
         flags.isAbove && !flags.isMain && !flags.isAnchor && !flags.isSeparate
     ) ? 0.7 : 1.0;
 
@@ -1929,7 +2060,8 @@ function styleForNode(node, flags, position, C) {
             border: colors.border,
             highlight: { background: C.HIGHLIGHT.bg, border: C.HIGHLIGHT.border },
         },
-        font: { color: colors.font, size: 12, face: 'monospace' },
+        // vis.js opacity leaves the label alone
+        font: { color: faded ? C.fadedFont : colors.font, size: 12, face: 'monospace' },
         // WIP nodes get a dashed border (vis.js native). Only attach
         // shapeProperties when WIP so non-WIP nodes use defaults.
         ...(node.is_wip ? { shapeProperties: { borderDashes: [6, 4] } } : {}),
@@ -2020,16 +2152,17 @@ function styleForEdge(edge, edgeId, flags, C) {
         dashes = false;
     }
 
+    const fontColor = edge.is_stale ? C.edgeFontStale : C.edgeFontNormal;
     return {
         id: 'e' + edgeId,
         from: edge.from,
         to: edge.to,
         label: label,
-        color: { color: color, highlight: C.HIGHLIGHT.bg },
+        color: { color: color, highlight: C.HIGHLIGHT.bg, opacity: flags.faded ? FADE : 1 },
         width: width,
         dashes: dashes,
         font: {
-            color: edge.is_stale ? C.edgeFontStale : C.edgeFontNormal,
+            color: flags.faded ? withAlpha(fontColor, FADE) : fontColor,
             size: edge.is_stale ? 14 : 12,
             strokeWidth: 4,
             strokeColor: C.edgeStroke,
@@ -2046,12 +2179,12 @@ function styleForEdge(edge, edgeId, flags, C) {
 
 // Two in-flight changes that conflict when both land. Undirected, and
 // curved so it never hides under a parent edge between the same two.
-function styleForConflict(pair, C) {
+function styleForConflict(pair, C, faded) {
     return {
         id: 'x' + pair.a + '-' + pair.b,
         from: pair.a,
         to: pair.b,
-        color: { color: C.conflict, highlight: C.conflict, hover: C.conflict },
+        color: { color: C.conflict, highlight: C.conflict, hover: C.conflict, opacity: faded ? FADE : 1 },
         width: 4,
         arrows: { to: { enabled: false } },
         dashes: false,
@@ -2073,12 +2206,12 @@ function nextResult(id) {
 
 // A change that lands on the branch but collides with a queued patch
 // in the graph: dashed, since the collision comes once that lands.
-function styleForNextConflict(from, res, C) {
+function styleForNextConflict(from, res, C, faded) {
     return {
         id: 'q' + from + '-' + res.with.cn,
         from: from,
         to: res.with.cn,
-        color: { color: C.conflict, highlight: C.conflict, hover: C.conflict },
+        color: { color: C.conflict, highlight: C.conflict, hover: C.conflict, opacity: faded ? FADE : 1 },
         width: 4,
         dashes: [10, 6],
         arrows: { to: { enabled: false } },
@@ -2228,28 +2361,32 @@ function renderGraph(keepView = false) {
         const isBase = baseChainSet.has(edge.to);
         const bypass = _passesThroughNode(positions, edge.from, edge.to);
 
-        visEdges.push(styleForEdge(edge, edgeIdx, { isMainEdge, isBase, bypass }, C));
+        const faded = focusOnly() && !(focusTracked(nodeMap[edge.from]) && focusTracked(nodeMap[edge.to]));
+        visEdges.push(styleForEdge(edge, edgeIdx, { isMainEdge, isBase, bypass, faded }, C));
         edgeIdx++;
     }
     if (stacks) {
         for (const edge of (G.context_edges || [])) {
             if (!positions[edge.from] || !positions[edge.to]) continue;
             if (stackOwner[edge.to] !== edge.from) continue;
-            visEdges.push(styleForEdge(edge, edgeIdx, { context: true }, C));
+            visEdges.push(styleForEdge(edge, edgeIdx, { context: true, faded: focusOnly() }, C));
             edgeIdx++;
         }
     }
+    // A conflict stays in full while either side is ticked: it is
+    // that change's problem too.
+    const conflictFaded = (a, b) => focusOnly() && !focusTracked(nodeMap[a]) && !focusTracked(nodeMap[b]);
     if (conflicts) {
         for (const pair of G.conflicts.pairs) {
             if (!positions[pair.a] || !positions[pair.b]) continue;
-            visEdges.push(styleForConflict(pair, C));
+            visEdges.push(styleForConflict(pair, C, conflictFaded(pair.a, pair.b)));
         }
         const paired = new Set(G.conflicts.pairs.flatMap(p => [p.a + '-' + p.b, p.b + '-' + p.a]));
         for (const [id, res] of Object.entries((G.conflicts.next || {}).results || {})) {
             if (res.status !== 'conflict' || !res.with || !res.with.cn) continue;
             if (!positions[id] || !positions[res.with.cn]) continue;
             if (paired.has(id + '-' + res.with.cn)) continue;
-            visEdges.push(styleForNextConflict(parseInt(id), res, C));
+            visEdges.push(styleForNextConflict(parseInt(id), res, C, conflictFaded(parseInt(id), res.with.cn)));
         }
     }
 
@@ -2556,9 +2693,26 @@ function showNodeInfo(id) {
         </div>`
         : '';
 
+    // Without the ticked hashtags/topics (with none ticked, the asked
+    // ones): say which of their changes brought it in.
+    const ref = focusOnly() ? tagSel : ASKED;
+    let focusBanner = '';
+    if (ref.size && counted(node) && !inSelection(node, ref)) {
+        const near = nearestTracked(node.id, ref);
+        const one = ref.size === 1;
+        focusBanner = `<div class="field" style="background:var(--bg-inset);border-left:3px solid var(--text-muted);padding:6px 10px;border-radius:4px;margin-bottom:8px">
+            <span style="color:var(--text-muted);font-size:12px">${one ? 'No ' : 'None of '}${esc(selectionName(ref))}: ${near.length
+                ? 'in the graph next to ' + near.map(k => `<a href="#" onclick="clickNode(${k});return false">#${k}</a>`).join(', ') + ', which ' + (near.length > 1 ? 'have' : 'has') + (one ? ' it' : ' one')
+                : 'in the graph through its series'}.${focusOnly() ? ' Faded, and not counted.' : ''}</span>
+        </div>`;
+    }
+    const tag = (text, on) => '<span style="background:var(--bg-inset);padding:1px 6px;border-radius:3px;font-size:12px;margin-right:4px'
+        + (on ? ';color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)' : '') + '">' + esc(text) + '</span>';
+
     panel.innerHTML = `
         ${anchorBanner}
         ${unrelatedBanner}
+        ${focusBanner}
         <div class="field">
             <div class="fl">Change</div>
             <div class="fv">
@@ -2601,11 +2755,11 @@ function showNodeInfo(id) {
         </div>` : ''}
         ${node.topic ? `<div class="field">
             <div class="fl">Topic</div>
-            <div class="fv">${esc(node.topic)}</div>
+            <div class="fv">${ref.size && inSelection({ topic: node.topic }, ref) ? tag(node.topic, true) : esc(node.topic)}</div>
         </div>` : ''}
         ${(node.hashtags && node.hashtags.length > 0) ? `<div class="field">
             <div class="fl">Hashtags</div>
-            <div class="fv">${node.hashtags.map(h => '<span style="background:var(--bg-inset);padding:1px 6px;border-radius:3px;font-size:12px;margin-right:4px">' + esc(h) + '</span>').join('')}</div>
+            <div class="fv">${node.hashtags.map(h => tag(h, ref.size && inSelection({ hashtags: [h] }, ref))).join('')}</div>
         </div>` : ''}
         ${renderReviewPanel(node)}
         ${staleIncoming.length > 0 ? `
@@ -2746,6 +2900,28 @@ function nextField(node, res, link, files) {
         </div>`;
 }
 
+// The changes of selection `sel` nearest to `id` through edges either
+// way, up to three at the smallest distance found.
+function nearestTracked(id, sel) {
+    const seen = new Set([id]);
+    let level = [id];
+    for (let depth = 0; depth < 40 && level.length; depth++) {
+        const next = [];
+        for (const x of level) {
+            const around = (edgesFrom[x] || []).map(e => e.to).concat((edgesTo[x] || []).map(e => e.from));
+            for (const y of around) {
+                if (seen.has(y) || !nodeMap[y]) continue;
+                seen.add(y);
+                next.push(y);
+            }
+        }
+        const hits = next.filter(y => focusTracked(nodeMap[y], sel));
+        if (hits.length) return hits.sort((a, b) => a - b).slice(0, 3);
+        level = next;
+    }
+    return [];
+}
+
 // Panel for a stacks-view ancestor that isn't part of the graph.
 function contextNodeInfo(node) {
     const of = (node.context_of || []).map(c => `<a href="#" onclick="clickNode(${c});return false">#${c}</a>`).join(', ');
@@ -2849,6 +3025,19 @@ network.on('beforeDrawing', function (canvasCtx) {
     canvasCtx.stroke();
     canvasCtx.restore();
 });
+
+function onFocusToggle() {
+    renderStatsBar();
+    actions.refresh(true);
+    stApplyScope();
+}
+
+function toggleTagMenu(open) {
+    const menu = document.getElementById('tag-menu');
+    const show = open === undefined ? menu.classList.contains('hidden') : open;
+    menu.classList.toggle('hidden', !show);
+    document.getElementById('btn-tags').setAttribute('aria-expanded', String(show));
+}
 
 network.on('click', function(params) {
     if (params.nodes.length > 0) {
@@ -2959,6 +3148,20 @@ const actions = {
 
 document.getElementById('chk-abandoned').addEventListener('change', () => actions.refresh());
 document.getElementById('chk-conflicts').addEventListener('change', () => actions.refresh(true));
+document.getElementById('btn-tags').addEventListener('click', () => toggleTagMenu());
+document.getElementById('tag-menu').addEventListener('change', e => {
+    const k = e.target.dataset.key;
+    const keys = new Set(tagSel);
+    if (e.target.checked) keys.add(k); else keys.delete(k);
+    setTagSelection(keys);
+});
+document.getElementById('tag-menu').addEventListener('click', e => {
+    if (e.target.dataset.act === 'all') setTagSelection([]);
+});
+// composedPath: a click in the menu re-renders it, detaching the target
+document.addEventListener('click', e => {
+    if (!e.composedPath().includes(document.getElementById('tag-pick'))) toggleTagMenu(false);
+});
 document.getElementById('layout-trunk').addEventListener('click', () => setLayout('trunk'));
 document.getElementById('layout-stacks').addEventListener('click', () => setLayout('stacks'));
 document.getElementById('btn-fit').addEventListener('click', () => actions.fit());
@@ -2970,6 +3173,10 @@ document.getElementById('btn-theme').addEventListener('click', () => actions.tog
 
 // Keyboard
 document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && !document.getElementById('tag-menu').classList.contains('hidden')) {
+        toggleTagMenu(false);
+        return;
+    }
     // The Stats tab has no canvas: leave Ctrl+F to the browser's own
     // find and the remaining keys to page scrolling.
     if (isStatsTab()) {

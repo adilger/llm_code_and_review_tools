@@ -34,6 +34,68 @@ const stState = {
     attnAll: false,
     graphNeedsFit: false,
 };
+
+// The hashtags/topics picker changed.
+function stApplyScope() {
+    if (!stState.built) return;
+    stState.built = false;
+    if (isStatsTab()) buildStats();
+}
+
+function stSummary() {
+    return focusOnly() ? stSeriesSummary(stRecs.map(r => r.node)) : ST_SUM;
+}
+
+// summary.py's series_summary() of some nodes, as far as the KPI
+// tiles read it: the page counts any set of ticked hashtags/topics,
+// the payload only all changes and the asked ones (stats.focus).
+function stSeriesSummary(nodes) {
+    const asOf = ST_SUM.as_of, d30 = asOf - 30 * 86400, d60 = asOf - 60 * 86400;
+    const recs = nodes.filter(n => !n.trunk_structural && !n.unrelated_parent && n.opened_at);
+    const open = recs.filter(n => n.status === 'NEW');
+    const merged = recs.filter(n => n.status === 'MERGED');
+    const abandoned = recs.filter(n => n.status === 'ABANDONED');
+    const inWindow = (lo, hi, times) => times.filter(t => t != null && lo < t && t <= hi).length;
+    const times = {
+        opened: recs.map(n => n.opened_at),
+        merged: merged.map(n => n.closed_at),
+        abandoned: abandoned.map(n => n.closed_at),
+    };
+    const counts = (lo, hi) => ({
+        opened: inWindow(lo, hi, times.opened),
+        merged: inWindow(lo, hi, times.merged),
+        abandoned: inWindow(lo, hi, times.abandoned),
+    });
+    // Python's round(): half to even
+    const round = x => (Math.abs(x % 1) === 0.5 ? 2 * Math.round(x / 2) : Math.round(x));
+    const duration = values => {
+        const v = values.sort((a, b) => a - b);
+        return v.length ? { count: v.length, median: round(stQuantile(v, 0.5)), p90: round(stQuantile(v, 0.9)) }
+            : { count: 0, median: null, p90: null };
+    };
+    const ps = merged.map(n => n.current_patchset || (n.ps_times || []).length || 1).sort((a, b) => a - b);
+    let oldest = null;
+    for (const n of open) if (!oldest || n.opened_at < oldest.opened_at) oldest = n;
+    return {
+        as_of: asOf,
+        patches: recs.length,
+        open: open.length,
+        merged: merged.length,
+        abandoned: abandoned.length,
+        last_30d: counts(d30, asOf),
+        prev_30d: counts(d60, d30),
+        open_30d_ago: recs.filter(n => n.opened_at <= d30 && !(n.closed_at != null && n.closed_at <= d30)).length,
+        time_to_merge: duration(merged.filter(n => n.closed_at != null).map(n => n.closed_at - n.opened_at)),
+        time_to_first_review: G.review_activity
+            ? duration(recs.filter(n => n.first_review_at != null).map(n => n.first_review_at - n.opened_at)) : null,
+        patchsets_to_merge: {
+            count: ps.length,
+            median: ps.length ? stQuantile(ps, 0.5) : null,
+            max: ps.length ? ps[ps.length - 1] : null,
+        },
+        oldest_open: oldest ? { id: oldest.id, ticket: oldest.ticket || '', opened_at: oldest.opened_at } : null,
+    };
+}
 let stRecs = null;
 
 // ── tabs ──
@@ -93,6 +155,7 @@ function stBuildRecords() {
         // Unrelated merged patches kept only as a branch base, and
         // in-flight changes the series sits on that no search found.
         if (n.trunk_structural || n.unrelated_parent || !n.opened_at) continue;
+        if (!inSelection(n)) continue;
         const ps = (n.ps_times || []).map(t => t * 1000);
         out.push({
             id: n.id,
@@ -286,8 +349,8 @@ function buildStats() {
     const view = document.getElementById('stats-view');
     stRecs = ST_SUM ? stBuildRecords() : [];
     if (!stRecs.length) {
-        view.innerHTML = '<div class="st-empty">' + (ST_SUM ? 'No timestamp data in this graph.'
-            : 'This graph was built without statistics; rebuild it to see them.') + '</div>';
+        view.innerHTML = '<div class="st-empty">' + (!ST_SUM ? 'This graph was built without statistics; rebuild it to see them.'
+            : focusOnly() ? 'No patches with ' + esc(selectionName()) + '.' : 'No timestamp data in this graph.') + '</div>';
         stState.built = true;
         return;
     }
@@ -357,13 +420,6 @@ function buildStats() {
         document.querySelector('#st-dist-mode button[data-v="review"]').disabled = true;
     }
 
-    view.addEventListener('click', e => {
-        const row = e.target.closest('[data-jump]');
-        if (!row || e.target.closest('a')) return;
-        stJumpTo(parseInt(row.dataset.jump, 10));
-    });
-    view.addEventListener('mouseleave', stTipHide);
-
     stState.built = true;
     stDrawKpis();
     stDrawAll();
@@ -390,7 +446,7 @@ function stDrawAll() {
 
 // ── KPI tiles ──
 function stDrawKpis() {
-    const S = ST_SUM;
+    const S = stSummary();
     const delta = (now, prev) => {
         if (now === prev) return '<span class="st-flat">same as the 30 days before</span>';
         const up = now > prev;
@@ -933,7 +989,10 @@ function stDrawNotes() {
     const pruned = (G.stats.pruned_merged_cns || []).length;
     const parents = (G.stats.unrelated_parent_cns || []).length;
     const notes = [
-        'Covers the ' + stRecs.length + ' patches in this graph, including separate groups and abandoned patches.',
+        focusOnly()
+            ? 'Covers the ' + stRecs.length + ' patches with ' + (tagSel.size > 1 ? 'any of ' : '') + esc(selectionName())
+                + ' of the ' + G.stats.node_count + ' in this graph, abandoned ones included.'
+            : 'Covers the ' + stRecs.length + ' patches in this graph, including separate groups and abandoned patches.',
         'Created = first patchset upload. Merged = submit time. Abandoned = the last abandon not followed by a restore.',
         'Human review = a message from someone other than the owner, excluding CI bots and generated messages (uploads, rebases, AI reviews).',
         'Times are relative to the build (' + esc(G.generated_at || stDate(ST_NOW)) + '), not to now.',
@@ -954,6 +1013,14 @@ function stDrawNotes() {
 }
 
 // ── wiring ──
+// On the view, not in it: buildStats() runs again for every pick in
+// the hashtags/topics picker.
+document.getElementById('stats-view').addEventListener('click', e => {
+    const row = e.target.closest('[data-jump]');
+    if (!row || e.target.closest('a')) return;
+    stJumpTo(parseInt(row.dataset.jump, 10));
+});
+document.getElementById('stats-view').addEventListener('mouseleave', stTipHide);
 document.getElementById('tab-graph').addEventListener('click', () => showTab('graph'));
 document.getElementById('tab-stats').addEventListener('click', () => showTab('stats'));
 window.addEventListener('hashchange', () => showTab(location.hash === '#stats' ? 'stats' : 'graph'));

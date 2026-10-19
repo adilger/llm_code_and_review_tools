@@ -866,3 +866,248 @@ class TestUnrelatedParents:
         assert records == [66481, 69506]
         assert legend
         assert "Not part of this series" in info and "clickNode(69506)" in info
+
+
+class TestFocus:
+    """The "Hashtags/topics" picker: any hashtags/topics of the graph
+    ticked together; the asked ones (stats.focus) first."""
+
+    FADED = 0.25
+
+    def _payload(self, asked=("prio",), on=False, tag="prio"):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(101, hashtags=[tag], opened_at=1767225600),
+                 _node(102, hashtags=["master-next"], opened_at=1767225600),
+                 _node(103, hashtags=[tag], opened_at=1767225600),
+                 _node(104, topic="ec2", opened_at=1767225600)]
+        payload = _payload(101, nodes, [_edge(10, 101), _edge(101, 102), _edge(10, 103),
+                                        _edge(10, 104)])
+        payload["stats"]["status_counts"] = {"MERGED": 1, "NEW": 4}
+        payload["stats"]["summary"] = {"as_of": 1767225600}
+        if asked:
+            members = [101, 103] + ([104] if "ec2" in asked else [])
+            payload["stats"]["focus"] = {
+                "hashtags": [a for a in asked if a != "ec2"],
+                "topics": [a for a in asked if a == "ec2"], "on_by_default": on,
+                "node_count": len(members), "status_counts": {"NEW": len(members)},
+                "summary": {"patches": len(members)}}
+        return payload
+
+    # header, opacity and label color of 101..104, the picker's label
+    # and ticks, and the legend, as the page opens and after each pick
+    def _looks(self, payload, tmp_path, *picks):
+        expr = """(() => {
+            const look = () => [document.getElementById('stats').innerHTML,
+                Object.fromEntries([101, 102, 103, 104].map(id => [id,
+                    [nodesDS.get(id).opacity, nodesDS.get(id).font.color]])),
+                document.getElementById('tags-label').textContent, [...tagSel],
+                document.getElementById('legend').innerHTML];
+            const out = [look()];
+            for (const keys of PICKS) { setTagSelection(keys); out.push(look()); }
+            return JSON.stringify(out);
+        })()""".replace("PICKS", json.dumps(list(picks)))
+        return json.loads(_eval(payload, tmp_path, expr))
+
+    def _faded(self, styles):
+        return sorted(int(i) for i, (opacity, font) in styles.items()
+                      if opacity == self.FADED and font.startswith("rgba("))
+
+    def test_with_an_anchor_nothing_is_ticked(self, tmp_path):
+        (stats, styles, label, sel, legend), (stats2, styles2, label2, sel2, legend2) = \
+            self._looks(self._payload(), tmp_path, ["hashtag:prio"])
+        assert sel == [] and label == "all changes"
+        assert "In-flight: 4<" in stats and "5 changes" in stats and " of " not in stats
+        assert self._faded(styles) == []
+        assert sel2 == ["hashtag:prio"] and label2 == "#prio"
+        assert "In-flight: 2<" in stats2 and "2 of 5 changes" in stats2
+        assert self._faded(styles2) == [102, 104]
+        # 102/104 keep their own colors, only fainter; no legend entry
+        assert styles2["101"] == styles["101"]
+        assert legend2 == legend
+
+    def test_from_one_hashtag_alone_it_opens_ticked(self, tmp_path):
+        (stats, styles, label, sel, _l), (stats2, styles2, _lb, sel2, _l2) = \
+            self._looks(self._payload(on=True), tmp_path, [])
+        assert sel == ["hashtag:prio"] and label == "#prio" and "2 of 5 changes" in stats
+        assert self._faded(styles) == [102, 104]
+        assert sel2 == [] and self._faded(styles2) == []
+
+    def test_several_together(self, tmp_path):
+        (stats, styles, label, sel, _l), (stats2, styles2, label2, sel2, _l2) = self._looks(
+            self._payload(asked=("prio", "ec2"), on=True), tmp_path,
+            ["topic:ec2", "hashtag:master-next"])
+        assert sorted(sel) == ["hashtag:prio", "topic:ec2"] and label == "#prio, topic ec2"
+        assert "3 of 5 changes" in stats and self._faded(styles) == [102]
+        assert label2 == "topic ec2, #master-next" and "2 of 5 changes" in stats2
+        assert self._faded(styles2) == [101, 103]
+
+    def test_the_list(self, tmp_path):
+        expr = "document.getElementById('tag-menu').innerHTML"
+        one = _eval(self._payload(), tmp_path, expr)
+        assert one.index('data-act="all"') < one.index("Asked for") \
+            < one.index('data-key="hashtag:prio"') < one.index("Also in this graph") \
+            < one.index('data-key="hashtag:master-next"') < one.index('data-key="topic:ec2"')
+        assert '#prio</span><span class="tag-count">2<' in one and " checked" not in one
+        ticked = _eval(self._payload(on=True), tmp_path, expr)
+        assert 'data-key="hashtag:prio" checked' in ticked and ticked.count(" checked") == 1
+        nothing = _eval(self._payload(asked=()), tmp_path, expr)
+        assert "tag-group" not in nothing and 'data-key="hashtag:prio"' in nothing
+        absent = _eval(self._payload(asked=("nobody",)), tmp_path, expr)
+        assert '#nobody</span><span class="tag-count">0<' in absent
+
+    def test_most_common_first(self, tmp_path):
+        payload = self._payload(asked=())
+        for cn, tags in ((101, ["zz"]), (102, ["zz"]), (103, ["aa"])):
+            payload["nodes"][[n["id"] for n in payload["nodes"]].index(cn)]["hashtags"] = tags
+        menu = _eval(payload, tmp_path, "document.getElementById('tag-menu').innerHTML")
+        assert menu.index('data-key="hashtag:zz"') < menu.index('data-key="hashtag:aa"') \
+            < menu.index('data-key="topic:ec2"')
+
+    def test_an_unrelated_parent_counts_nowhere(self, tmp_path):
+        payload = self._payload(on=True)
+        payload["nodes"].append(_node(105, hashtags=["prio"], unrelated_parent=True,
+                                      opened_at=1767225600))
+        payload["edges"].append(_edge(105, 104))
+        payload["stats"]["unrelated_parent_cns"] = [105]
+        expr = """JSON.stringify([document.getElementById('tag-menu').innerHTML,
+            document.getElementById('stats').innerHTML, nodesDS.get(105).opacity])"""
+        menu, stats, opacity = json.loads(_eval(payload, tmp_path, expr))
+        assert '#prio</span><span class="tag-count">2<' in menu
+        assert "2 of 5 changes" in stats and opacity == self.FADED
+
+    def test_the_menu_ticks_and_clears(self, tmp_path):
+        expr = """(() => {
+            const menu = document.getElementById('tag-menu');
+            const out = [];
+            for (const [key, checked] of [['topic:ec2', true], ['hashtag:prio', true], ['topic:ec2', false]]) {
+                menu.listeners.change[0]({ target: { dataset: { key }, checked } });
+                out.push([...tagSel].sort());
+            }
+            menu.listeners.click[0]({ target: { dataset: { act: 'all' } } });
+            out.push([...tagSel], document.getElementById('tag-pick').classList.contains('on'));
+            return JSON.stringify(out);
+        })()"""
+        assert json.loads(_eval(self._payload(), tmp_path, expr)) == [
+            ["topic:ec2"], ["hashtag:prio", "topic:ec2"], ["hashtag:prio"], [], False]
+
+    def test_no_hashtags_no_picker(self, tmp_path):
+        payload = self._payload(asked=())
+        for n in payload["nodes"]:
+            n["hashtags"], n["topic"] = [], ""
+        expr = "document.getElementById('tag-pick').style.display || ''"
+        assert _eval(payload, tmp_path, expr) == "none"
+
+    def test_nothing_ticked_looks_like_nothing_asked(self, tmp_path):
+        payload, plain = self._payload(), self._payload(asked=())
+        a, b = (_render(p, tmp_path, "a0m1", "a0m0", "a1m1") for p in (payload, plain))
+        assert a == b
+        assert self._looks(payload, tmp_path)[0] == self._looks(plain, tmp_path)[0]
+
+    def test_edges_fade_with_their_changes(self, tmp_path):
+        payload = self._payload(on=True)
+        payload["conflicts"] = {
+            "branch": "master", "tip": "4a7bddaf15ceb6d4fbe9e54cef4e2cf23a98263f",
+            "results": {str(c): {"status": "clean"} for c in (101, 102, 103, 104)},
+            "pairs": [{"a": 101, "b": 104, "files": ["a.c"]},
+                      {"a": 102, "b": 104, "files": ["b.c"]}],
+            "pairs_tried": 3, "pair_errors": 0,
+        }
+        expr = """(() => {
+            document.getElementById('chk-conflicts').checked = true;
+            renderGraph();
+            return JSON.stringify(edgesDS.get().map(e => [e.from, e.to, e.color.opacity]));
+        })()"""
+        edges = {(a, b): o for a, b, o in json.loads(_eval(payload, tmp_path, expr))}
+        assert edges[(10, 101)] == self.FADED and edges[(101, 102)] == self.FADED
+        # a conflict stays while either side is ticked
+        assert edges[(101, 104)] == 1 and edges[(102, 104)] == self.FADED
+
+    def test_panel(self, tmp_path):
+        expr = """JSON.stringify([(showNodeInfo(102), document.getElementById('info').innerHTML),
+            (showNodeInfo(103), document.getElementById('info').innerHTML)])"""
+        untracked, tracked = json.loads(_eval(self._payload(), tmp_path, expr))
+        assert "No #prio: in the graph next to" in untracked and "clickNode(101)" in untracked
+        assert "which has it." in untracked and "Faded" not in untracked
+        assert "box-shadow:inset 0 0 0 1px var(--accent)" in tracked and "No #prio" not in tracked
+        untracked, _ = json.loads(_eval(self._payload(on=True), tmp_path, expr))
+        assert "Faded, and not counted." in untracked
+        untracked, _ = json.loads(_eval(self._payload(asked=("prio", "ec2"), on=True), tmp_path, expr))
+        assert "None of #prio, topic ec2: in the graph next to" in untracked and "which has one" in untracked
+        untracked, _ = json.loads(_eval(self._payload(asked=()), tmp_path, expr))
+        assert "No #" not in untracked and "None of" not in untracked
+
+    def test_stats_tab_follows_the_picker(self, tmp_path):
+        expr = """(() => {
+            const out = [];
+            for (const keys of [[], ['hashtag:prio'], ['topic:ec2', 'hashtag:master-next']]) {
+                setTagSelection(keys);
+                stRecs = stBuildRecords();
+                out.push([stRecs.map(r => r.id).sort(), focusOnly() ? stSummary().patches : null]);
+            }
+            return JSON.stringify(out);
+        })()"""
+        assert json.loads(_eval(self._payload(), tmp_path, expr)) == [
+            [[101, 102, 103, 104], None], [[101, 103], 2], [[102, 104], 2]]
+
+    def test_a_tag_is_escaped(self, tmp_path):
+        expr = ("JSON.stringify([document.getElementById('stats').innerHTML,"
+                " document.getElementById('tags-label').innerHTML,"
+                " document.getElementById('tag-menu').innerHTML,"
+                " (showNodeInfo(102), document.getElementById('info').innerHTML)])")
+        out = "".join(json.loads(_eval(self._payload(asked=("<b>x</b>",), on=True, tag="<b>x</b>"),
+                                       tmp_path, expr)))
+        assert "<b>x</b>" not in out and "#&lt;b&gt;x&lt;/b&gt;" in out
+
+
+class TestPickedSummary:
+    """The page's KPI numbers for a ticked set are summary.py's."""
+
+    DAY = 86400
+    AS_OF = 1790000000
+
+    def _nodes(self):
+        d, t = self.DAY, self.AS_OF
+        specs = [
+            # cn, status, tags, opened days ago, closed days ago, review after (s), patchsets
+            (201, "MERGED", ["a"], 90, 10, 3600, 5),
+            (202, "MERGED", ["a"], 40, 35, 7200, 2),
+            (203, "MERGED", ["b"], 20, 5, None, 3),
+            (204, "NEW", ["a"], 70, None, 1801, 4),
+            (205, "NEW", ["b"], 25, None, 1800, 1),
+            (206, "ABANDONED", ["a"], 50, 45, None, 2),
+            (207, "NEW", ["a", "b"], 5, None, None, 1),
+            (208, "MERGED", ["a"], 31, 29, 2, 7),
+            # opened with 204: the oldest open is the first listed
+            (211, "NEW", ["a"], 70, None, None, 1),
+            # on the 30-day boundary: in the 30 days before, not the last
+            (212, "NEW", ["a"], 30, None, None, 1),
+        ]
+        # #a's median upload -> first review is 2700.5 s: Python rounds
+        # it to even
+        nodes = []
+        for cn, status, tags, opened, closed, review, ps in specs:
+            n = _node(cn, status, hashtags=tags, current_patchset=ps)
+            n["opened_at"] = t - opened * d
+            n["closed_at"] = t - closed * d if closed is not None else None
+            n["first_review_at"] = n["opened_at"] + review if review is not None else None
+            n["ps_times"] = [n["opened_at"]]
+            nodes.append(n)
+        nodes.append(_node(209, hashtags=["a"]))  # no timeline: counted nowhere
+        nodes.append(_node(210, hashtags=["a"], unrelated_parent=True,
+                           opened_at=t - 3 * d))
+        return nodes
+
+    @pytest.mark.parametrize("keys", [["hashtag:a"], ["hashtag:b"], ["hashtag:a", "hashtag:b"]])
+    def test_same_as_python(self, tmp_path, keys):
+        from gerrit_cli.graph.summary import series_summary
+        nodes = self._nodes()
+        payload = _payload(201, nodes, [])
+        payload["review_activity"] = True
+        payload["stats"]["summary"] = series_summary(nodes, self.AS_OF, True)
+        tags = {k.split(":")[1] for k in keys}
+        want = series_summary([n for n in nodes if tags & set(n["hashtags"])], self.AS_OF, True)
+        expr = f"JSON.stringify(stSeriesSummary(G.nodes.filter(n => inSelection(n, new Set({json.dumps(keys)})))))"
+        got = json.loads(_eval(payload, tmp_path, expr))
+        assert got == {k: want[k] for k in got}
+        assert set(got) >= {"patches", "last_30d", "prev_30d", "open_30d_ago", "time_to_merge",
+                            "time_to_first_review", "patchsets_to_merge", "oldest_open"}

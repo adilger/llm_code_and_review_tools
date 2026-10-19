@@ -20,7 +20,8 @@ current chain. By fetching ALL_REVISIONS for each change, we can reconnect
 these orphans to the correct parent change at the correct (stale) patchset.
 """
 
-from .build import build_graph, resolve_ticket_anchor
+from .build import build_graph, resolve_search_anchor, resolve_ticket_anchor
 from .render import generate_html, save_and_open
 
-__all__ = ["build_graph", "resolve_ticket_anchor", "generate_html", "save_and_open"]
+__all__ = ["build_graph", "resolve_search_anchor", "resolve_ticket_anchor",
+           "generate_html", "save_and_open"]

@@ -1093,7 +1093,12 @@ def add_graph_parser(subparsers):
              "anchor automatically: the in-flight patch whose series "
              "has the most in-flight members (newest merged patch "
              "when the ticket has nothing in flight) and pulls in "
-             "every change whose subject starts with the ticket.",
+             "every change whose subject starts with the ticket. "
+             "hashtag:NAME (or #NAME) and topic:NAME build the graph "
+             "of the changes carrying that hashtag or topic, picking "
+             "the anchor among them, and track them as with "
+             "--include-hashtag/--include-topic; the page opens "
+             "with them ticked.",
     )
     parser.add_argument(
         "--output", "-o",
@@ -1133,14 +1138,18 @@ def add_graph_parser(subparsers):
         default="",
         metavar="TOPICS",
         help="Comma-separated list of ADDITIONAL topics to include "
-             "(beyond the anchor's own topic)",
+             "(beyond the anchor's own topic). They come first in the "
+             "page's \"Hashtags/topics\" picker: the changes with a "
+             "ticked one stand out, the others fade, and only they are "
+             "counted (payload stats.focus)",
     )
     parser.add_argument(
         "--include-hashtag",
         default="",
         metavar="HASHTAGS",
         help="Comma-separated list of ADDITIONAL hashtags to include "
-             "(beyond the anchor's own hashtags)",
+             "(beyond the anchor's own hashtags). Tracked like "
+             "--include-topic",
     )
     parser.add_argument(
         "--ticket",
@@ -1157,10 +1166,10 @@ def add_graph_parser(subparsers):
         "--branch",
         default=None,
         metavar="BRANCH",
-        help="Branch for ticket-mode anchor selection (default: "
-             "master). Only used when the url argument is a bare "
-             "ticket; with a change URL/number the anchor's own "
-             "branch scopes the graph as usual.",
+        help="Branch for ticket-, hashtag- and topic-mode anchor "
+             "selection (default: master). Only used then; with a "
+             "change URL/number the anchor's own branch scopes the "
+             "graph as usual.",
     )
     parser.add_argument(
         "--cross-project",

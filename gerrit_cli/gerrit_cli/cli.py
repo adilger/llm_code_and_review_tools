@@ -219,15 +219,39 @@ def cmd_graph(args):
     pretty = getattr(args, "pretty", False)
     try:
         import re as _re
-        from .graph import resolve_ticket_anchor
+        from .graph import resolve_search_anchor, resolve_ticket_anchor
         client = GerritCommentsClient()
         extra_tickets_raw = getattr(args, "ticket", "") or ""
         extra_tickets = [
             t.strip() for t in extra_tickets_raw.split(",") if t.strip()
         ]
+        extra_topics_raw = getattr(args, "include_topic", "") or ""
+        extra_hashtags_raw = getattr(args, "include_hashtag", "") or ""
+        extra_topics = [t.strip() for t in extra_topics_raw.split(",") if t.strip()]
+        extra_hashtags = [h.strip() for h in extra_hashtags_raw.split(",") if h.strip()]
         ticket_arg = (args.url or "").strip()
         name = getattr(args, "name", None)
-        if _re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", ticket_arg):
+        skip_topic = getattr(args, "skip_topic", False)
+        skip_hashtag = getattr(args, "skip_hashtag", False)
+        focus_on_by_default = False
+        search = _re.fullmatch(r"(?:(hashtag|topic):|#)(\S+)", ticket_arg)
+        if search:
+            # Hashtag/topic mode: like ticket mode, the anchor is picked
+            # from the changes carrying it, which are what the graph is
+            # about (its focus). The anchor's own other hashtags and
+            # topic would pull in whatever else it belongs to.
+            skip_topic = skip_hashtag = True
+            focus_on_by_default = True
+            kind, value = search.group(1) or "hashtag", search.group(2)
+            branch = getattr(args, "branch", None) or "master"
+            change_number = resolve_search_anchor(client, kind, value, branch=branch)
+            base_url = client.url.rstrip("/")
+            wanted = extra_hashtags if kind == "hashtag" else extra_topics
+            if value not in wanted:
+                wanted.insert(0, value)
+            if not name:
+                name = f"#{value}" if kind == "hashtag" else f"topic {value}"
+        elif _re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", ticket_arg):
             # Ticket mode: pick the anchor automatically (in-flight
             # patch in the biggest in-flight series; newest merged
             # as fallback) and expand by the ticket itself.
@@ -245,12 +269,6 @@ def cmd_graph(args):
             base_url, change_number = GerritCommentsClient.parse_gerrit_url(args.url)
         skip_details = getattr(args, "skip_ci_details", False)
         fetch_comments = getattr(args, "comments", False)
-        skip_topic = getattr(args, "skip_topic", False)
-        skip_hashtag = getattr(args, "skip_hashtag", False)
-        extra_topics_raw = getattr(args, "include_topic", "") or ""
-        extra_hashtags_raw = getattr(args, "include_hashtag", "") or ""
-        extra_topics = [t.strip() for t in extra_topics_raw.split(",") if t.strip()]
-        extra_hashtags = [h.strip() for h in extra_hashtags_raw.split(",") if h.strip()]
         cross_project_branch = getattr(args, "cross_project", False)
         graph_data = build_graph(
             client, change_number, base_url,
@@ -264,7 +282,14 @@ def cmd_graph(args):
             cross_project_branch=cross_project_branch,
             name=name,
             conflicts_repo=getattr(args, "conflicts", None),
+            focus_on_by_default=focus_on_by_default,
         )
+        if search and graph_data["merged_trunk"]:
+            # The picked change only chose what to fetch. Centred on the
+            # oldest merged change, the trunk runs up from the anchor and
+            # the in-flight work sits around it; a picked change with no
+            # parent in the graph stood alone above the whole trunk.
+            graph_data["anchor"] = graph_data["merged_trunk"][0]
 
         html_content = generate_html(graph_data)
         output_path = getattr(args, "output", None)

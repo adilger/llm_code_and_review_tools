@@ -22,6 +22,10 @@
         <button id="tab-graph" class="active" role="tab">Graph</button>
         <button id="tab-stats" role="tab">Stats</button>
     </span>
+    <span class="tag-pick" id="tag-pick">
+        <button id="btn-tags" aria-haspopup="true" aria-expanded="false" title="Tick hashtags and topics: the changes with any of them stand out, the others fade, and the header and the Stats tab count only them">Hashtags/topics: <span id="tags-label">all changes</span> &#x25BE;</button>
+        <div class="tag-menu hidden" id="tag-menu"></div>
+    </span>
     <label class="graph-only"><input type="checkbox" id="chk-abandoned"> Show abandoned</label>
     <label class="graph-only" id="lbl-conflicts" title="Red edges join two in-flight changes that conflict when both land; a red border marks a change that does not apply on the branch. Click a change for the files."><input type="checkbox" id="chk-conflicts"> Show conflicts</label>
     <span class="tabs graph-only" role="group" title="Trunk: merged patches in one column in landing order, in-flight work branching off it. Stacks: one column per in-flight branch, standing on the merged patch it branches off.">

@@ -218,6 +218,13 @@ gc graph LU-18222 --branch b_es7_0    # non-master ticket anchor
 # (works like --include-hashtag, subject-match semantics)
 gc graph 61962 --ticket LU-18222,LU-17916
 
+# Track the changes carrying a hashtag or topic ("Tracked hashtags and
+# topics" below): no anchor needed, it is picked among them
+gc graph hashtag:218_review_priority --name "2.18 Review Prio Patches"
+gc graph topic:ec2
+# or keep an anchor and name what to track
+gc graph 61965 --include-hashtag pt_ecro
+
 # Trial-merge the in-flight changes against master and each other,
 # in a local clone of the project (see "Conflicts" below)
 gc graph 61962 --conflicts ~/lustre-release
@@ -272,6 +279,26 @@ includes:
 - **Separate-series trees** for patches sharing the anchor's topic or
   hashtags. Each group gets its own distinctive border when it's not
   wired back into the main chain by a cross-group edge.
+- **Hashtags and topics**: the "Hashtags/topics" picker (next to
+  "Show abandoned", on both tabs) lists every hashtag and topic in the
+  graph with its number of changes. Ticking one or more makes the
+  changes with any of them stand out: every other change fades out,
+  box, label and edges (a conflict edge stays while either side is
+  ticked), and the header and the Stats tab count only the ticked
+  ones. "All changes" clears it. A faded change's panel names the
+  ticked changes it is next to. Hashtags and topics are "asked for"
+  with `hashtag:NAME` / `#NAME` / `topic:NAME` as the change argument
+  or with `--include-hashtag` / `--include-topic`; they are listed
+  first, and a graph built from them alone (hashtag/topic mode) opens
+  with them ticked. With an anchor it opens with nothing ticked and
+  looks as without the picker. The anchor's own hashtags and topic
+  still pull in their series but are not asked for (every anchor with
+  a topic would be). In hashtag/topic mode the change carrying it
+  whose /related series holds the most changes carrying it and the
+  fewest others decides what is fetched (its series gets a deeper
+  expansion; its other hashtags and topic are not expanded), and the
+  page is centred on the oldest merged change, so the trunk runs up
+  from the anchor.
 - **Abandoned bridges**: if an abandoned patch sits between two active
   ones in the main chain, it stays visible by default so the chain
   isn't cut. Pure trailing-abandoned tails are hidden unless
@@ -322,6 +349,14 @@ includes:
   | `oldest_open` | `{id, ticket, opened_at}` of the open patch uploaded first |
   | `longest_idle` | `{id, ticket, last_activity}` of the open patch whose last upload or human review is oldest |
   | `merged_by_month` | `[["YYYY-MM", count], ...]`: the 12 calendar months ending with `as_of`'s |
+
+  A graph built with hashtags or topics asked for also has
+  `stats.focus`, the same numbers for the changes carrying any of them
+  (absent otherwise): `hashtags` and `topics` (what was asked for),
+  `on_by_default` (whether the page opens on them), `node_count`,
+  `status_counts`, and `summary` in the schema above. `stats.summary`
+  and `stats.status_counts` keep counting every change. Any other
+  combination the picker can tick is counted by the page itself.
 
   Each node also carries `opened_at`, `closed_at`, `closed_approx`
   (no close event was found; the last update time stands in),
