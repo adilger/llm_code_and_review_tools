@@ -742,6 +742,56 @@ class TestRender:
         assert _eval(payload, tmp_path, "nodeMap[101].subject") == G["nodes"][1]["subject"]
 
 
+class TestTrunkSideKidLean:
+    """A trunk side kid whose subtree leans back toward the trunk (61965:
+    69346 with 69694 left of it) must not land on its sibling's column:
+    _resolveCollisions then pushed a whole row of side chains one column
+    out, bending each of them."""
+
+    def _payload(self):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(11, "MERGED", submitted="2026-02-01"),
+                 _node(12, "MERGED", submitted="2026-03-01")]
+        edges = [_edge(10, 11), _edge(11, 12)]
+
+        def chain(*cns):
+            nodes.extend(_node(c) for c in cns)
+            edges.extend(_edge(a, b) for a, b in zip(cns, cns[1:]))
+        chain(201)
+        chain(202, 212, 222, 232)
+        chain(203)
+        chain(204, 214, 224)        # 204's left side kid: inward, toward 202
+        chain(215, 225, 235, 245)   # 204's main kid
+        chain(216, 226)             # 204's right side kid
+        edges += [_edge(11, c) for c in (201, 202, 203, 204)]
+        edges += [_edge(204, 215), _edge(204, 216)]
+        return _payload(10, nodes, edges)
+
+    def test_it_moves_out_by_what_it_leans(self, tmp_path):
+        pos = _pos(_render(self._payload(), tmp_path, "a0m1")["a0m1"])
+        assert {pos[c][0] for c in (202, 212, 222, 232)} == {NODE_W}
+        x = pos[204][0]
+        assert x == 3 * NODE_W
+        assert pos[214][0] == pos[224][0] == x - NODE_W
+        assert pos[216][0] == pos[226][0] == x + NODE_W
+        assert {pos[c][0] for c in (215, 225, 235, 245)} == {x}
+
+    def test_it_stays_when_what_it_leans_over_is_free(self, tmp_path):
+        """54050: the anchor is the trunk top; its kid on an old patchset
+        branches left and reaches back over the free column above it."""
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(11, "MERGED", submitted="2026-02-01", current_patchset=2)]
+        edges = [_edge(10, 11)]
+        for cn in (401, 411, 421, 431, 441, 451, 461):
+            nodes.append(_node(cn))
+        # 421: main kid 431 (it has a kid), side kids 441 left, 451 right
+        edges += [_edge(11, 401, 1, 2), _edge(401, 411), _edge(411, 421),
+                  _edge(421, 431), _edge(421, 441), _edge(421, 451), _edge(431, 461)]
+        pos = _pos(_render(_payload(11, nodes, edges), tmp_path, "a0m1")["a0m1"])
+        assert pos[401][0] == pos[431][0] == -NODE_W
+        assert pos[451][0] == 0
+
+
 class TestUnrelatedParents:
     """69505: in flight, not in the series, but 69506 sits on it."""
 

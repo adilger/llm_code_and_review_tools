@@ -406,9 +406,8 @@ function _subtreeWidth(ctx, id) {
 // doesn't reserve the unused half-allocation and visually drift
 // away from its parent. For symmetric subtrees the result equals
 // (w-1)/2 on both sides — same as the old centered formula.
-// Assumes non-trunk-parent alternation; the parentInTrunk branch
-// in _layoutTree uses leftX/rightX directly and never consults
-// this helper.
+// Assumes non-trunk-parent alternation, so it is only asked about
+// in-flight subtrees.
 function _subtreeExtents(ctx, id) {
     if (ctx.extentsCache[id] !== undefined) return ctx.extentsCache[id];
     const kidsAll = _layoutKids(ctx, id);
@@ -648,15 +647,22 @@ function _layoutTree(ctx, id, x, level, dir) {
     // can step in full LEVEL_H units without colliding with the next
     // trunk row.
     //
-    // When the parent is a trunk node, skip the (w-1)*NODE_W/2
-    // centering: the trunk column is reserved at x=0, and a tall
-    // chain-like side kid (e.g. 62852 with 15 leaves spread across
-    // 22 levels) shouldn't get shoved 7 node widths away just
-    // because its leaf-count is large. Place it at parent.x ±
-    // NODE_W and let its subtree extend further out from there.
-    // For non-trunk parents we keep the centered allocation so
-    // siblings under a normal in-flight node don't overlap.
+    // A side kid sits far enough out that its subtree's inner extent
+    // (ext.right on the left, ext.left on the right) clears the
+    // columns its siblings took; a chain has none and hugs the
+    // parent. Under a trunk parent it moves out only as far as those
+    // columns are taken in its rows -- the free column above the
+    // trunk top may hold it -- but no less: a subtree leaning back
+    // onto a sibling's column made _resolveCollisions bend a whole
+    // row of chains (61965).
     const parentInTrunk = trunkSet.has(id);
+    const innerFree = (kid, kidX, cols, step) => {
+        const h = _subtreeHeight(ctx, kid) * dir;
+        for (let c = 1; c <= cols; c++) {
+            if (_columnBlocked(ctx, kidX + c * step, level + dir, h)) return false;
+        }
+        return true;
+    };
 
     // Pre-place a CHAIN mainKid in the parent column BEFORE side
     // branches. Chain mainLevel is level+dir and doesn't depend on
@@ -690,9 +696,11 @@ function _layoutTree(ctx, id, x, level, dir) {
         // parent.x - NODE_W - (w-1)*NODE_W/2. For symmetric subtrees
         // ext.right = (w-1)/2, matching the old centered formula.
         const ext = _subtreeExtents(ctx, kid);
-        const kidX = parentInTrunk
-            ? leftX
-            : leftX - ext.right * NODE_W;
+        let kidX = leftX - ext.right * NODE_W;
+        if (parentInTrunk) {
+            kidX = leftX;
+            while (kidX > leftX - ext.right * NODE_W && !innerFree(kid, kidX, ext.right, NODE_W)) kidX -= NODE_W;
+        }
         const top = _layoutTree(ctx, kid, kidX, level + dir, dir);
         updateExtreme(top);
         // Advance past the columns the subtree ACTUALLY occupies
@@ -707,9 +715,11 @@ function _layoutTree(ctx, id, x, level, dir) {
     let rightX = x + NODE_W;
     for (const kid of rightKids) {
         const ext = _subtreeExtents(ctx, kid);
-        const kidX = parentInTrunk
-            ? rightX
-            : rightX + ext.left * NODE_W;
+        let kidX = rightX + ext.left * NODE_W;
+        if (parentInTrunk) {
+            kidX = rightX;
+            while (kidX < rightX + ext.left * NODE_W && !innerFree(kid, kidX, ext.left, -NODE_W)) kidX += NODE_W;
+        }
         const top = _layoutTree(ctx, kid, kidX, level + dir, dir);
         updateExtreme(top);
         rightX = kidX + (ext.right + 1) * NODE_W;
