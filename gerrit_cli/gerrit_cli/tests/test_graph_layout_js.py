@@ -792,6 +792,42 @@ class TestTrunkSideKidLean:
         assert pos[451][0] == 0
 
 
+class TestLonePieces:
+    """Chains tied to nothing placed (based on master older than the
+    trunk) sit next to the anchor, not past the widest row."""
+
+    def _payload(self):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(11, "MERGED", submitted="2026-02-01"),
+                 _node(101)]
+        edges = [_edge(10, 11), _edge(11, 101)]
+        # a wide row of side branches under the anchor's row
+        for cn in range(201, 207):
+            nodes.append(_node(cn))
+            edges.append(_edge(10, cn))
+        # 104 and 105 beside 103, one row above where a two-row tree
+        # next to the anchor would end
+        nodes += [_node(102), _node(103), _node(104), _node(105)]
+        edges += [_edge(101, 102), _edge(102, 103), _edge(102, 104), _edge(102, 105)]
+        # an unplaced main-series tree and a lone separate-group change
+        nodes += [_node(401), _node(402), _node(301, series_group=1)]
+        edges.append(_edge(401, 402))
+        payload = _payload(101, nodes, edges)
+        payload["separate_groups"] = [{"id": 1, "label": "x", "node_ids": [301]}]
+        payload["separate_chains"] = [[301]]
+        return payload
+
+    def test_next_to_the_anchor(self, tmp_path):
+        pos = _pos(_render(self._payload(), tmp_path, "a0m1")["a0m1"])
+        assert pos[101] == (0, 0)
+        assert max(pos[cn][0] for cn in range(201, 207)) >= 2 * NODE_W
+        assert pos[105] == (NODE_W, -2 * LEVEL_H)
+        # a free half column (STACK_GAP) to the sides, a free row above
+        # and below: one step further right than 105 alone needs
+        assert (pos[401], pos[402]) == ((NODE_W * 5 // 2, 0), (NODE_W * 5 // 2, -LEVEL_H))
+        assert pos[301] == (NODE_W * 4, 0)
+
+
 class TestUnrelatedParents:
     """69505: in flight, not in the series, but 69506 sits on it."""
 

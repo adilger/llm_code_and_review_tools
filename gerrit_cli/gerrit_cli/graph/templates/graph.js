@@ -844,16 +844,9 @@ function _layoutSeparateGroups(ctx) {
         lastRight = Math.max(lastRight, baseX);
     }
 
-    // Disconnected chains: far-right shelf starting past the main
-    // tree and any anchored columns we just placed.
-    let mainMaxX = 0;
-    for (const pos of Object.values(positions)) {
-        mainMaxX = Math.max(mainMaxX, pos.x);
-    }
-    let shelfX = Math.max(mainMaxX, lastRight) + NODE_W * 2;
+    // Disconnected chains: one column each, next to the anchor.
     for (const chain of disconnected) {
-        _placeChainColumn(ctx, chain, shelfX, 0);
-        shelfX += NODE_W;
+        _placeCells(ctx, chain.map((id, i) => [0, i, id]));
     }
 
     _layoutSeparateFixup(ctx);
@@ -946,8 +939,8 @@ function _layoutSeparateFixup(ctx) {
 // Place main-series nodes no earlier phase reached: mostly chains
 // based on master history older than every merged patch in the graph
 // (left unhooked by the Python side), plus anything that connects to
-// the main tree only through a node placed later. They go in columns
-// at the far right of everything already placed, roots on level 0.
+// the main tree only through a node placed later. Each tree goes
+// next to the anchor, roots on level 0.
 function _layoutUnplacedMainSeries(ctx) {
     const positions = ctx.positions;
     const unplaced = new Set();
@@ -977,12 +970,26 @@ function _layoutUnplacedMainSeries(ctx) {
         owned.add(id);
     }
     const roots = [...unplaced].filter(id => !owned.has(id)).sort((a, b) => a - b);
-
-    let mainMaxX = 0;
-    for (const pos of Object.values(positions)) {
-        mainMaxX = Math.max(mainMaxX, pos.x);
+    const shapeOf = _shapeForest(kidsOf);
+    for (const r of roots) {
+        _placeCells(ctx, shapeOf(r).cells.filter(([, , n]) => positions[n] === undefined));
     }
-    _placeForest(ctx, roots, kidsOf, mainMaxX + NODE_W * 2);
+}
+
+// Place cells [column, level, id] of nodes tied to nothing placed, roots
+// on the anchor's row, in the first spot right of the anchor with a
+// gap all around them: a free row above and below, STACK_GAP to the
+// sides. Past the widest row was often far from anything (a hashtag
+// graph's lone change sat 10 columns out, the anchor's row empty).
+function _placeCells(ctx, cells) {
+    if (cells.length === 0) return;
+    const width = 1 + Math.max(...cells.map(c => c[0]));
+    const top = -(1 + Math.max(...cells.map(c => c[1]))) * LEVEL_H;
+    const near = Object.values(ctx.positions).filter(p => p.y >= top && p.y <= LEVEL_H);
+    const clear = NODE_W + STACK_GAP;
+    let x = 0;
+    while (near.some(p => p.x > x - clear && p.x < x + (width - 1) * NODE_W + clear)) x += STACK_GAP;
+    for (const [c, l, n] of cells) _placeNode(ctx, n, x + c * NODE_W, -l * LEVEL_H);
 }
 
 // True when a node sits right above or below (x, y) that is neither
