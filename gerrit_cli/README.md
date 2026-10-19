@@ -457,7 +457,7 @@ series-comments <URL>            # Get comments for all patches in series
 series-info <URL>                # Info for all patches (patchsets, reviews, CI)
 related <URL>                    # Relation chain (series) for a change
 graph <URL>                      # Interactive DAG visualizer (see above)
-info <URL>                       # Show change info (reviewers, labels, etc.)
+info <URL>                       # Show change info (reviewers, CI, merge conflict)
 diff <URL> [A [B]]               # What changed between two patchsets
                                  # (default: newest against the one before)
 search <query>                   # Search changes (alias: s); --all follows

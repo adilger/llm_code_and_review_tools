@@ -221,6 +221,19 @@ def _info_for_change(client, change_number, show_bots=False):
             "build_number": build["number"],
         }
 
+    # Whether the current patchset still merges into its branch: false is
+    # the web UI's "Merge Conflict", a change to rebase.  Gerrit computes
+    # it on request and leaves it out of the change, so ask.  Only an open
+    # change can conflict; null when it is closed or Gerrit cannot say.
+    mergeable = None
+    if change.get("status") == "NEW" and current_revision:
+        try:
+            answer = client.get_mergeable(change_number, current_revision)
+        except Exception:
+            answer = {}
+        if isinstance(answer, dict) and isinstance(answer.get("mergeable"), bool):
+            mergeable = answer["mergeable"]
+
     return {
         "change_number": change_number,
         "change_id": change.get("change_id", ""),
@@ -228,6 +241,7 @@ def _info_for_change(client, change_number, show_bots=False):
         "branch": change.get("branch", ""),
         "subject": change.get("subject", ""),
         "status": change.get("status", ""),
+        "mergeable": mergeable,
         "owner": change.get("owner", {}).get("name", ""),
         "current_patchset": current_patchset,
         "current_revision": current_revision,
