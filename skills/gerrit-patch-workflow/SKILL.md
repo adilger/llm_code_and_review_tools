@@ -93,6 +93,18 @@ silently skip a comment, and do not answer a finding by adding an
 explanatory code comment (see the lreview spin-cycle skill for why that
 habit wrecks a patch).
 
+Gerrit renders Markdown in replies, `gc message` text and review messages,
+so a plain-text table there loses its alignment. Put any table, column-aligned
+output or log excerpt in a fenced block (three backticks on their own line
+before and after) or indent every line 4 spaces:
+
+````
+```
+test       before   after
+sanity 17h FAIL     PASS
+```
+````
+
 ## Posting a whole review from JSON
 
 ```bash
