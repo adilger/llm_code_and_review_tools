@@ -86,9 +86,12 @@ with `may_change` and `halt.you_may_clear` what you could do about it.
   and reports on the rest. Never uploads to the change.
 - **shepherd**: retest, and once CI passes, adds reviewers if too few are
   active, pings them at 7 and 21 days, and adds a second set after 14 quiet
-  days. Never uploads to the change.
-- **smallfix**: repairs builds, rebases, and makes small changes reviewers
-  ask for.
+  days. Its only upload is a simple rebase (a cherry-pick veto, or a patchset
+  over 30 days old): when the rebase needs no code changes, or only
+  mechanical substitutions, it uploads and says so on the change; any other
+  conflict is left for a person.
+- **smallfix**: repairs builds, rebases through conflicts, and makes small
+  changes reviewers ask for.
 - **bigfix**: makes everything reviewers ask for; design-level changes wait
   for the owner.
 - **own**: as bigfix, without waiting on design changes.
