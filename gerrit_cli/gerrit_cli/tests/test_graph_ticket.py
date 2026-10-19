@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from gerrit_cli.graph.build import (
+    _add_lone_anchor,
     _collect_search_labels,
     resolve_ticket_anchor,
 )
@@ -146,3 +147,35 @@ class TestTicketSearchLabels:
         )
         labels = _collect_search_labels(ctx)
         assert ('message:"LU-18222"', "ticket LU-18222") in labels
+
+
+class TestLoneAnchor:
+    """67069 has no related changes: /related lists nothing for it."""
+
+    def _ctx(self, found: bool, known: bool = False) -> SimpleNamespace:
+        change = {"_number": 67069, "subject": "LU-20451 llapi: keep existing file",
+                  "status": "NEW", "_current_revision_number": 3,
+                  "owner": {"name": "A"}, "hashtags": ["218_review_priority"],
+                  "project": "fs/lustre-release", "branch": "master"}
+        return SimpleNamespace(
+            change_number=67069, nodes={67069: {"id": 67069}} if known else {},
+            raw_entries=[], client=_client({"change:67069": [change] if found else []}),
+            base_url="https://gerrit.invalid", project="fs/lustre-release",
+            branch="master")
+
+    def test_it_is_its_own_series(self):
+        ctx = self._ctx(True)
+        _add_lone_anchor(ctx)
+        node = ctx.nodes[67069]
+        assert node["hashtags"] == ["218_review_priority"] and node["current_patchset"] == 3
+        assert [e["cn"] for e in ctx.raw_entries] == [67069]
+
+    def test_a_change_with_related_changes_is_left_alone(self):
+        ctx = self._ctx(True, known=True)
+        _add_lone_anchor(ctx)
+        assert ctx.client.rest.calls == [] and ctx.raw_entries == []
+
+    def test_a_change_gerrit_does_not_know(self):
+        ctx = self._ctx(False)
+        _add_lone_anchor(ctx)
+        assert ctx.nodes == {}

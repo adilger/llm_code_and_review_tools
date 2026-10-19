@@ -350,6 +350,22 @@ def _parse_related_entries(
     return added
 
 
+def _add_lone_anchor(ctx: BuildContext) -> None:
+    """A change with no related changes is a series of its own; /related
+    lists nothing for it, so without this the graph had no anchor and,
+    with no hashtag or topic of it to search, nothing at all."""
+    if ctx.change_number in ctx.nodes:
+        return
+    node = _fetch_single_change(ctx, ctx.change_number)
+    if node is None:
+        return
+    ctx.nodes[ctx.change_number] = node
+    ctx.raw_entries.append({
+        "cn": ctx.change_number, "commit": "", "parent_commit": "",
+        "ps": node["current_patchset"], "latest": node["current_patchset"],
+    })
+
+
 def _expand_via_related_fanout(ctx: BuildContext) -> int:
     """Gerrit's /related is asymmetric: the chain Gerrit returns when
     queried from the anchor may omit side branches that are visible
@@ -2567,6 +2583,7 @@ def build_graph(
     logger.start(f"/related(#{change_number})")
     entries = _fetch_related(ctx)
     _parse_related_entries(ctx, entries)
+    _add_lone_anchor(ctx)
     logger.done(f"{len(entries)} changes")
 
     logger.start("Fan-out over initial set")
