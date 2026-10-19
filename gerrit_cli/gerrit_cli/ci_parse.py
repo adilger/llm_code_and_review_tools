@@ -100,6 +100,14 @@ _TESTING_URL = r"https://testing\.whamcloud\.com/\S+"
 _MALOO_RESULTS_RE = re.compile(rf"Maloo Results:\s*({_TESTING_URL})")
 _MALOO_QUEUE_RE = re.compile(rf"Maloo Test Queue:\s*({_TESTING_URL})")
 _SESSION_URL_RE = re.compile(_TESTING_URL)
+# One line of Maloo's session enumeration: "- <group> on <server>/<client>/<fs>/<fs>".
+_ENUM_LINE_RE = re.compile(r"^- (\S+) on (\S+)", re.MULTILINE)
+# Autotest's retest request: the group, the server and (when it differs) the client.
+_RETEST_REQ_RE = re.compile(r"retesting (?:enforced|optional) (\S+) session(?: on (\S+?)/\S+ "
+                            r"servers and (?:(\S+?)/\S+ )?clients)?")
+# A result's platform: "RHEL 9.7 / x86_64", or "<server>, <client>" when they differ.
+_PLATFORM_RE = re.compile(r"([A-Za-z]+) (\d[\d.]*(?: SP\d+)?) / (\S+)")
+_CUSTOM_SLOT_RE = re.compile(r"custom-\d+")
 # Janitor messages link their own job's results page ("All results and
 # logs" / "Job output URL"), not Maloo sessions.
 _JANITOR_URL_RE = re.compile(r"https://testing\.whamcloud\.com/gerrit-janitor/\S+?results\.html")
@@ -215,6 +223,51 @@ def parse_build(change: dict, ps: int | None = None) -> dict:
     return {"state": "NONE", "url": "", "number": "", "when": ""}
 
 
+def _client_token(platform: str) -> str | None:
+    """A result's client platform as Autotest names it ("RHEL 9.7 / x86_64" ->
+    "el9.7-x86_64"), or None when it cannot tell."""
+    m = _PLATFORM_RE.fullmatch(platform.split(",")[-1].strip())
+    if not m:
+        return None
+    name, ver, arch = m.group(1).lower(), m.group(2).lower(), m.group(3)
+    name = {"rhel": "el", "centos": "el"}.get(name, name)
+    if name == "ubuntu":
+        ver = ver.replace(".", "")
+    return f"{name}{ver.replace(' ', '')}-{arch}"
+
+
+def _retest_matches(req: dict, name: str, platform: str) -> bool:
+    """Whether an Autotest retest request is for this result's group and client."""
+    if req["group"] != name and not (req["group"] == "custom" and _CUSTOM_SLOT_RE.fullmatch(name)):
+        return False
+    token = _client_token(platform)
+    return token is None or req["client"] is None or token == req["client"]
+
+
+def _slot_failures(fails: list[dict], passes: list[dict], reqs: list[dict]) -> tuple[list, bool]:
+    """The failing slots of a group that runs several sessions on one platform
+    (one subtest-change session per changed subtest): another slot's verdict is
+    not a retest, so a verdict is a retest's only when a retest was asked for
+    after an open failure.  Returns the open failures and whether every one has
+    a retest asked for and not answered yet."""
+    events = sorted([(e["when"], 1, "fail", e) for e in fails]
+                    + [(e["when"], 1, "pass", e) for e in passes]
+                    + [(r["date"], 0, "req", r) for r in reqs], key=lambda x: (x[0], x[1]))
+    open_: list[dict] = []
+    asked = 0
+    for _, _, kind, e in events:
+        if kind == "req":
+            asked += 1 if open_ else 0
+        elif asked and open_:
+            asked -= 1
+            prev = open_.pop(0)
+            if kind == "fail":
+                open_.append(dict(e, attempts=prev["attempts"] + 1))
+        elif kind == "fail":
+            open_.append(dict(e, attempts=1))
+    return open_, bool(open_) and asked >= len(open_)
+
+
 def parse_tests(change: dict, ps: int | None = None) -> dict:
     """Maloo/Autotest test state for the current patchset, or for ``ps``.
 
@@ -227,6 +280,7 @@ def parse_tests(change: dict, ps: int | None = None) -> dict:
     optional_failed: list[dict] = []
     retests: list[dict] = []
     sessions_enumerated = False
+    enumerated: dict[tuple[str, str], int] = {}
     last_when = ""
     results_url = ""
     queue_url = ""
@@ -238,13 +292,19 @@ def parse_tests(change: dict, ps: int | None = None) -> dict:
         text = m.get("message", "")
 
         if author == AUTOTEST_BOT and "retest" in text.lower():
-            retests.append({"date": m.get("date", ""), "message": text.strip()[:200]})
+            req = _RETEST_REQ_RE.search(text)
+            retests.append({"date": m.get("date", ""), "message": text.strip()[:200],
+                            "group": req.group(1) if req else None,
+                            "client": (req.group(3) or req.group(2)) if req else None})
             continue
         if author != MALOO_BOT:
             continue
         last_when = m.get("date", "")
         if "The following sessions will be run" in text:
             sessions_enumerated = True
+            enumerated = {}
+            for g, target in _ENUM_LINE_RE.findall(text):
+                enumerated[(g, target)] = enumerated.get((g, target), 0) + 1
             # The enumeration message carries the links to all of this
             # build's sessions; a re-run on the same patchset posts a
             # fresh enumeration, so the newest one wins.
@@ -281,55 +341,43 @@ def parse_tests(change: dict, ps: int | None = None) -> dict:
                     optional_failed.append({"test": test_name, "platform": platform,
                                             "url": url, "detail": detail})
 
-    # A retest is only *pending* while it postdates the group's newest
-    # verdict — once the retest has run and failed again, a new Maloo
-    # message exists and the group must count as failing again.  And a
-    # Maloo +1 vote supersedes all retest bookkeeping: it is the
-    # aggregate all-enforced-passed verdict, even though the retested
-    # group may never get its own "Passed enforced" message.
-    # The label holds the vote for the current results, not an older ps.
     maloo_vote = _bot_vote(change, MALOO_BOT) if ps == relevant else 0
-    retested = set()
-    if maloo_vote <= 0:
-        for rt in retests:
-            low = rt["message"].lower()
-            for name, r in enforced.items():
-                if name.lower() not in low:
-                    continue
-                last_verdict = max((e["when"] for e in r["fail"] + r["pass"]), default="")
-                if rt["date"] > last_verdict:
-                    retested.add(name)
+    # Groups Maloo runs more than once on one platform for a build: those
+    # sessions are slots of their own, which the messages do not tell apart.
+    multi_slot = {g for (g, _), n in enumerated.items() if n > 1}
 
     failed_tests = []
     enforced_pass = 0
     enforced_fail = 0
     for name in sorted(enforced):
         r = enforced[name]
-        # The same session (group+platform) often fails repeatedly across
-        # retests — collapse to the newest attempt and count the repeats,
-        # so it isn't displayed/counted as several distinct failures.
-        dedup: dict[str, dict] = {}
-        for e in r["fail"]:
-            prev = dedup.get(e["platform"])
-            if prev is None:
-                e = dict(e)
-                e["attempts"] = 1
-                dedup[e["platform"]] = e
-            elif e["when"] >= prev["when"]:
-                e = dict(e)
-                e["attempts"] = prev["attempts"] + 1
-                dedup[e["platform"]] = e
-            else:
-                prev["attempts"] += 1
-        # The newest verdict per (group, platform) wins: a "Passed
-        # enforced" message newer than the failure means the session
-        # healed on retest: a requested retest passes, Maloo posts the
-        # pass but keeps -1 for the still-failing groups.
-        for p in r["pass"]:
-            prev = dedup.get(p["platform"])
-            if prev is not None and p["when"] >= prev["when"]:
-                del dedup[p["platform"]]
-        fails = sorted(dedup.values(), key=lambda x: x["when"])
+        fails = []
+        pending = []
+        for platform in dict.fromkeys(e["platform"] for e in r["fail"]):
+            pf = [e for e in r["fail"] if e["platform"] == platform]
+            pp = [e for e in r["pass"] if e["platform"] == platform]
+            reqs = [rt for rt in retests if _retest_matches(rt, name, platform)]
+            if name in multi_slot:
+                open_, asked = _slot_failures(pf, pp, reqs)
+                fails += open_
+                pending.append(asked)
+                continue
+            # The same session (group+platform) often fails repeatedly across
+            # retests: collapse to the newest attempt and count the repeats,
+            # so it isn't displayed/counted as several distinct failures.
+            newest = max(pf, key=lambda e: e["when"])
+            # The newest verdict per (group, platform) wins: a "Passed
+            # enforced" message newer than the failure means the session
+            # healed on retest: a requested retest passes, Maloo posts the
+            # pass but keeps -1 for the still-failing groups.
+            if any(p["when"] >= newest["when"] for p in pp):
+                continue
+            fails.append(dict(newest, attempts=len(pf)))
+            # A retest is only *pending* while it postdates the newest verdict:
+            # once the retest has run and failed again, a new Maloo message
+            # exists and the group must count as failing again.
+            pending.append(any(rt["date"] > newest["when"] for rt in reqs))
+        fails.sort(key=lambda x: x["when"])
         enforced_pass += len(r["pass"])
         enforced_fail += len(fails)
         if fails:
@@ -337,7 +385,12 @@ def parse_tests(change: dict, ps: int | None = None) -> dict:
                 "name": name,
                 "passed": len(r["pass"]),
                 "failures": fails,
-                "retest_pending": name in retested,
+                # A Maloo +1 vote supersedes all retest bookkeeping: it is the
+                # aggregate all-enforced-passed verdict, even though the
+                # retested group may never get its own "Passed enforced"
+                # message.  The label holds the vote for the current results,
+                # not an older ps.
+                "retest_pending": maloo_vote <= 0 and all(pending),
             })
 
     # Maloo's vote is the aggregate verdict and wins over per-session
