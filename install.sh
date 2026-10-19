@@ -327,17 +327,26 @@ for req in project.get("dependencies", []):
 PY
 }
 
+# Editable installs run from the source tree, and a pull leaves its bytecode
+# stale until the first run rewrites it. Do that here, so the files a file
+# integrity check sees after an update are the ones that stay.
+precompile() {
+    $PYTHON -m compileall -q "$1" > /dev/null 2>&1 || true
+}
+
 # install_tool <label> <dir>: pip-install the tool unless it is up to date.
 install_tool() {
     local label="$1" dir="$2"
     echo ""
     if [ "${REINSTALL:-0}" != "1" ] && tool_installed "$dir"; then
+        precompile "$dir"
         echo -e "${GREEN}✓${NC} $label up to date" \
             "($(sed -n 's/^version = "\(.*\)"/\1/p' "$dir/pyproject.toml" | head -1))"
         return 0
     fi
     echo "Installing $label..."
     $PYTHON -m pip install -q -e "$dir"
+    precompile "$dir"
     echo -e "${GREEN}✓${NC} $label installed"
 }
 
