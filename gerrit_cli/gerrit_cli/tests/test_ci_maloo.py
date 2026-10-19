@@ -127,3 +127,38 @@ def test_commit_message_only_patchset_reports_earlier_results():
     assert data["patchset"] == 1
     assert data["current_patchset"] == 2
     assert data["state"] == "PASS"
+
+
+class _OpenChange(FakeClient):
+    """An open change whose mergeability Gerrit reports on request."""
+
+    def __init__(self, answer):
+        super().__init__([])
+        self.answer = answer
+        self.asked = []
+
+    def get_change(self, change_number, options=None):
+        return {**super().get_change(change_number, options), "status": "NEW"}
+
+    def get_mergeable(self, change_number, revision="current"):
+        self.asked.append((change_number, revision))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def test_info_reports_a_merge_conflict_of_the_current_patchset():
+    client = _OpenChange({"submit_type": "CHERRY_PICK", "mergeable": False})
+    info = _info_for_change(client, 69696)
+    assert info["mergeable"] is False
+    assert client.asked == [(69696, "r13")], "asked for the current revision"
+    assert _info_for_change(_OpenChange({"mergeable": True}), 1)["mergeable"] is True
+
+
+def test_info_mergeable_is_null_when_gerrit_cannot_say_or_the_change_is_closed():
+    assert _info_for_change(_OpenChange(RuntimeError("503")), 1)["mergeable"] is None
+    assert _info_for_change(_OpenChange({"submit_type": "CHERRY_PICK"}), 1)["mergeable"] is None
+    merged = _OpenChange({"mergeable": False})
+    merged.get_change = lambda number, options=None: {**FakeClient.get_change(merged, number, options), "status": "MERGED"}
+    assert _info_for_change(merged, 1)["mergeable"] is None
+    assert merged.asked == [], "a closed change is never asked"

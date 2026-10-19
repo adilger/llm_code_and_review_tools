@@ -322,6 +322,19 @@ class GerritCommentsClient:
             f"/changes/{change_number}" + (f"?{query}" if query else "")
         )
 
+    def get_mergeable(
+        self, change_number: int, revision: str = "current"
+    ) -> dict[str, Any]:
+        """Whether a revision still merges into its branch as it is.
+
+        Gerrit works this out on request; review.whamcloud.com leaves
+        'mergeable' out of the change itself.  The answer carries
+        submit_type, strategy and mergeable.
+        """
+        return self.rest.get(
+            f"/changes/{change_number}/revisions/{revision}/mergeable"
+        )
+
     def get_self_account(self) -> dict[str, Any]:
         """The account these credentials log in as."""
         return self.rest.get("/accounts/self")

@@ -731,6 +731,12 @@ passed is not counted. A patchset that only changed the commit message is
 not built or tested again; its results are the earlier patchset's, named
 in ci.results_patchset.
 
+mergeable is false when the current patchset no longer merges into its
+branch, what the web UI shows as Merge Conflict: rebase the change and
+upload a new patchset. It is true when it merges, and null for a closed
+change or when Gerrit cannot say. Gerrit works it out on request, so it
+costs one more request per open change.
+
 For the text a reviewer posted with a vote, use
 'gc comments URL --all --include-system'.
 """,
