@@ -1,6 +1,6 @@
 // Run a gc graph page's script headless and dump what vis.js is fed.
 //
-//   node graph_layout_harness.mjs PAGE.html [COMBO ...] [--eval EXPR]
+//   node graph_layout_harness.mjs PAGE.html [COMBO ...] [--eval EXPR] [--hash HASH]
 //
 // COMBO is "a<0|1>m<0|1>": Show abandoned, and the layout (m1 = Trunk,
 // m0 = Stacks; on pages from before the Trunk | Stacks switch, the
@@ -9,7 +9,8 @@
 // Prints JSON {combos: {COMBO: {nodes: [...], edges: [...]}}, errors,
 // eval}: every node's position, label and style and every drawn edge,
 // plus the layout phase that placed each node. --eval runs EXPR in
-// the page after the combos and returns its value.
+// the page after the combos and returns its value; --hash opens the
+// page with that URL fragment (e.g. "#stats&tags=topic:ec2").
 //
 // The DOM and vis.js are stubs: this checks the data the page hands
 // to vis.js, not pixels.
@@ -19,6 +20,8 @@ import vm from 'node:vm';
 const argv = process.argv.slice(2);
 const evalIdx = argv.indexOf('--eval');
 const evalExpr = evalIdx >= 0 ? argv.splice(evalIdx, 2)[1] : null;
+const hashIdx = argv.indexOf('--hash');
+const startHash = hashIdx >= 0 ? argv.splice(hashIdx, 2)[1] : '';
 const [pagePath, ...comboArgs] = argv;
 const html = fs.readFileSync(pagePath, 'utf8');
 const m = html.match(/<script>\n([\s\S]*)<\/script>\s*<\/body>/);
@@ -134,7 +137,8 @@ const errors = [];
 const sandbox = {
     document, console: { log() {}, warn() {}, error: (...a) => errors.push(a.join(' ')) },
     vis: { DataSet, Network },
-    location: { hash: '' },
+    location: { hash: startHash, pathname: '/graph.html', search: '' },
+    history: { replaceState(state, title, url) { sandbox.location.hash = url.startsWith('#') ? url : ''; } },
     navigator: { clipboard: { writeText() {} } },
     localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
     setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame: () => 0,

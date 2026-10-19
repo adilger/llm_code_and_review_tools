@@ -1059,6 +1059,75 @@ class TestFocus:
         assert "<b>x</b>" not in out and "#&lt;b&gt;x&lt;/b&gt;" in out
 
 
+class TestPickInTheUrl:
+    """The ticked hashtags/topics live in the URL's #, so a reload keeps
+    them: "tags=" and the keys when they differ from the page's default."""
+
+    _STATE = """JSON.stringify([[...tagSel].sort(), location.hash,
+        document.getElementById('stats').innerHTML.match(/\\d+ of \\d+ changes|\\d+ changes/)[0]])"""
+
+    def _open(self, payload, tmp_path, hash_, expr=None):
+        page = tmp_path / "graph.html"
+        page.write_text(generate_html(payload))
+        out = subprocess.run([NODE, str(HARNESS), str(page), "a0m1", "--hash", hash_,
+                              "--eval", expr or self._STATE],
+                             capture_output=True, text=True, check=True)
+        result = json.loads(out.stdout)
+        assert result["errors"] == []
+        return json.loads(result["eval"])
+
+    def test_a_reload_keeps_the_pick(self, tmp_path):
+        anchored = TestFocus()._payload()
+        assert self._open(anchored, tmp_path, "") == [[], "", "5 changes"]
+        assert self._open(anchored, tmp_path, "#tags=topic:ec2") == [
+            ["topic:ec2"], "#tags=topic:ec2", "1 of 5 changes"]
+        # opened filtered, "all changes" picked: stays all
+        tag_only = TestFocus()._payload(on=True)
+        assert self._open(tag_only, tmp_path, "") == [["hashtag:prio"], "", "2 of 5 changes"]
+        assert self._open(tag_only, tmp_path, "#tags=") == [[], "#tags=", "5 changes"]
+
+    @staticmethod
+    def _with_summary(payload):
+        """The Stats tab draws stats.summary in full."""
+        from gerrit_cli.graph.summary import series_summary
+        for n in payload["nodes"]:
+            n.setdefault("closed_at", None)
+            n.setdefault("first_review_at", None)
+            n.setdefault("last_activity", None)
+        payload["stats"]["summary"] = series_summary(payload["nodes"], 1767225600, False)
+        return payload
+
+    def test_picking_writes_it_and_the_default_clears_it(self, tmp_path):
+        expr = """JSON.stringify([
+            (setTagSelection(['hashtag:prio', 'topic:ec2']), location.hash),
+            (showTab('stats'), location.hash),
+            (setTagSelection([]), location.hash),
+            (showTab('graph'), location.hash)])"""
+        assert self._open(self._with_summary(TestFocus()._payload()), tmp_path, "", expr) == [
+            "#tags=hashtag:prio,topic:ec2", "#stats&tags=hashtag:prio,topic:ec2",
+            "#stats", ""]
+        tag_only = self._with_summary(TestFocus()._payload(on=True))
+        assert self._open(tag_only, tmp_path, "", expr)[2:] == ["#stats&tags=", "#tags="]
+
+    def test_with_the_stats_tab(self, tmp_path):
+        expr = "JSON.stringify([isStatsTab(), [...tagSel]])"
+        assert self._open(self._with_summary(TestFocus()._payload()), tmp_path,
+                          "#stats&tags=topic:ec2", expr) == [True, ["topic:ec2"]]
+        assert self._open(self._with_summary(TestFocus()._payload(on=True)), tmp_path,
+                          "#stats", expr) == [True, ["hashtag:prio"]]
+
+    def test_a_tag_the_graph_no_longer_has_is_dropped(self, tmp_path):
+        state = self._open(TestFocus()._payload(), tmp_path, "#tags=hashtag:gone,hashtag:prio")
+        assert state[0] == ["hashtag:prio"]
+
+    def test_odd_characters_round_trip(self, tmp_path):
+        payload = TestFocus()._payload(asked=(), tag="a,b&c#d")
+        expr = """(() => { setTagSelection(['hashtag:a,b&c#d']); const h = location.hash;
+            return JSON.stringify([h, readHash().tags]); })()"""
+        h, tags = self._open(payload, tmp_path, "", expr)
+        assert h == "#tags=hashtag:a%2Cb%26c%23d" and tags == ["hashtag:a,b&c#d"]
+
+
 class TestPickedSummary:
     """The page's KPI numbers for a ticked set are summary.py's."""
 

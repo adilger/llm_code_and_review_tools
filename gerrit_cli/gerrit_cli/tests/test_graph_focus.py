@@ -130,6 +130,15 @@ class TestCmdGraphModes:
         assert kw["extra_topics"] == ["ec2"] and kw["extra_hashtags"] == ["pt_ecro", "ec2x"]
         assert kw["name"] == "EC"
 
+    def test_ticket_mode_with_hashtags_opens_on_all_changes(self):
+        with patch('gerrit_cli.graph.resolve_ticket_anchor', return_value=42) as ticket:
+            resolve, call = self._run("LU-18222", include_hashtag="prio", include_topic="ec2")
+        assert ticket.call_count == 1 and resolve.call_count == 0
+        kw = call.kwargs
+        assert kw["extra_hashtags"] == ["prio"] and kw["extra_topics"] == ["ec2"]
+        assert kw["focus_on_by_default"] is False
+        assert self.anchor == 42
+
     def test_a_hashtag_no_change_carries_is_an_error(self, capsys):
         from gerrit_cli.cli import cmd_graph
         args = argparse.Namespace(url="hashtag:nobody", pretty=False, no_open=True,

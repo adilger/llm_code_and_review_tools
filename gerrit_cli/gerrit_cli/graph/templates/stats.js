@@ -108,10 +108,7 @@ function showTab(name) {
     document.body.classList.toggle('tab-stats', stats);
     document.getElementById('tab-graph').classList.toggle('active', !stats);
     document.getElementById('tab-stats').classList.toggle('active', stats);
-    const want = stats ? '#stats' : '';
-    if (location.hash !== want) {
-        history.replaceState(null, '', want || (location.pathname + location.search));
-    }
+    writeHash(stats);
     if (stats) {
         closeSearch();
         if (!stState.built) buildStats();
@@ -1023,14 +1020,19 @@ document.getElementById('stats-view').addEventListener('click', e => {
 document.getElementById('stats-view').addEventListener('mouseleave', stTipHide);
 document.getElementById('tab-graph').addEventListener('click', () => showTab('graph'));
 document.getElementById('tab-stats').addEventListener('click', () => showTab('stats'));
-window.addEventListener('hashchange', () => showTab(location.hash === '#stats' ? 'stats' : 'graph'));
+window.addEventListener('hashchange', () => {
+    const h = readHash();
+    const keys = h.tags === null ? DEFAULT_TAGS : new Set(h.tags.filter(k => TAGS.some(t => t.key === k)));
+    if (keys.size !== tagSel.size || [...keys].some(k => !tagSel.has(k))) setTagSelection(keys);
+    showTab(h.stats ? 'stats' : 'graph');
+});
 let stResizeTimer = null;
 window.addEventListener('resize', () => {
     if (!isStatsTab() || !stState.built) return;
     clearTimeout(stResizeTimer);
     stResizeTimer = setTimeout(stDrawAll, 150);
 });
-if (location.hash === '#stats') {
+if (readHash().stats) {
     stState.graphNeedsFit = true;
     showTab('stats');
 }

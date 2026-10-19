@@ -64,8 +64,37 @@ const TAGS = (() => {
     return [...ASKED].map(k => ({ key: k, asked: true, count: seen.get(k) || 0 }))
         .concat(others.map(k => ({ key: k, asked: false, count: seen.get(k) })));
 })();
-// The ticked ones; none ticked = all changes.
-let tagSel = new Set(FOCUS && FOCUS.on_by_default ? ASKED : []);
+// The view kept in the URL's #, so a reload or a shared link keeps it:
+// "stats" for the Stats tab, "tags=" and the ticked hashtags/topics
+// when they differ from what the page opens with ("tags=" alone: none).
+function readHash() {
+    const out = { stats: false, tags: null };
+    for (const part of location.hash.replace(/^#/, '').split('&')) {
+        if (part === 'stats') out.stats = true;
+        if (!part.startsWith('tags=')) continue;
+        out.tags = part.slice(5).split(',').filter(Boolean).map(k => {
+            try { return decodeURIComponent(k); } catch (e) { return ''; }
+        });
+    }
+    return out;
+}
+function writeHash(stats) {
+    const parts = stats ? ['stats'] : [];
+    const asOpened = tagSel.size === DEFAULT_TAGS.size && [...tagSel].every(k => DEFAULT_TAGS.has(k));
+    if (!asOpened) {
+        parts.push('tags=' + TAGS.filter(t => tagSel.has(t.key))
+            .map(t => encodeURIComponent(t.key).replace(/%3A/g, ':')).join(','));
+    }
+    const want = parts.length ? '#' + parts.join('&') : '';
+    if (location.hash !== want) {
+        history.replaceState(null, '', want || (location.pathname + location.search));
+    }
+}
+// The ticked ones; none ticked = all changes. A hashtag the URL names
+// that this build no longer has is dropped.
+const DEFAULT_TAGS = new Set(FOCUS && FOCUS.on_by_default ? ASKED : []);
+const hashTags = readHash().tags;
+let tagSel = hashTags ? new Set(hashTags.filter(k => TAGS.some(t => t.key === k))) : new Set(DEFAULT_TAGS);
 function focusOnly() {
     return tagSel.size > 0;
 }
@@ -203,6 +232,7 @@ function setTagSelection(keys) {
     tagSel = new Set(keys);
     renderTagMenu();
     onFocusToggle();
+    writeHash(isStatsTab());
 }
 if (TAGS.length) renderTagMenu();
 else document.getElementById('tag-pick').style.display = 'none';

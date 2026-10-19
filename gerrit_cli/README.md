@@ -291,7 +291,10 @@ includes:
   or with `--include-hashtag` / `--include-topic`; they are listed
   first, and a graph built from them alone (hashtag/topic mode) opens
   with them ticked. With an anchor it opens with nothing ticked and
-  looks as without the picker. The anchor's own hashtags and topic
+  looks as without the picker. What is ticked is kept in the URL
+  (`#tags=hashtag:pt_ecro,topic:ec2`, with the Stats tab
+  `#stats&tags=...`; `#tags=` alone: nothing ticked), so a reload of
+  the page keeps it and a link shares it. The anchor's own hashtags and topic
   still pull in their series but are not asked for (every anchor with
   a topic would be). In hashtag/topic mode the change carrying it
   whose /related series holds the most changes carrying it and the
