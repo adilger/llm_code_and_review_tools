@@ -31,6 +31,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(uc, "_STATE_FILE", tmp_path / "state" / "update_cache.json")
     monkeypatch.delenv(uc.DISABLE_ENV, raising=False)
     monkeypatch.setattr(sys, "argv", ["/home/u/.local/bin/jira", "get", "LU-1"])
+    monkeypatch.setattr(uc, "_under_test", lambda: False)
 
     class Fake:
         local = LOCAL
@@ -124,6 +125,15 @@ def test_not_launched_as_a_tool_does_nothing(env, monkeypatch, argv0):
 def test_launched_as_a_tool(monkeypatch, argv0):
     monkeypatch.setattr(sys, "argv", [argv0])
     assert uc._launched_as_tool()
+
+
+def test_quiet_under_pytest_even_with_a_tool_argv(env, monkeypatch):
+    """gerrit_cli's tests set sys.argv to ["gerrit", ...] and call main()."""
+    monkeypatch.undo()
+    monkeypatch.setattr(sys, "argv", ["gerrit", "info", "1"])
+    monkeypatch.setattr(uc, "_remote_head", lambda: pytest.fail("network"))
+    monkeypatch.setattr(uc, "_load_config", lambda: pytest.fail("config read"))
+    uc.maybe_check_for_updates()
 
 
 def test_env_var_disables(env, monkeypatch):

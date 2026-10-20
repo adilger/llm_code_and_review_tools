@@ -198,6 +198,15 @@ def _launched_as_tool() -> bool:
     return bool(sys.argv) and Path(sys.argv[0]).name in COMMANDS
 
 
+def _under_test() -> bool:
+    """True inside a pytest run, or a process a test started.
+
+    argv alone is not enough: tests set sys.argv to ["gerrit", ...] and
+    call main(), and that must not reach GitHub or the real cache.
+    """
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
 def _is_interactive() -> bool:
     """True if a human is at the terminal: stdin, stdout and stderr TTYs.
 
@@ -477,7 +486,7 @@ def maybe_check_for_updates() -> None:
 def _check() -> None:
     if os.environ.get(DISABLE_ENV, "").strip() not in ("", "0"):
         return
-    if not _launched_as_tool():
+    if not _launched_as_tool() or _under_test():
         return
     cfg = _load_config()
     mode = cfg["update_check"].get("mode", "prompt")
