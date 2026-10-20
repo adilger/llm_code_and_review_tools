@@ -240,6 +240,23 @@ Keep them task-shaped rather than tool-shaped: each CLI already
 answers `--help` and `describe`, so a skill earns its place by
 carrying the sequencing and judgment that those cannot.
 
+## Update notices
+
+The core tools (`gerrit`/`gc`, `jira`, `maloo`, `jenkins`, `janitor`,
+`lreview`, `pw-cli`) check GitHub daily and, when this checkout is behind, print
+one line to stderr:
+
+```
+llm-tools: update available (3507cba -> 8c1f2e4).  Run: /path/to/install.sh --update
+```
+
+It is not an error, and the command's JSON on stdout is unaffected.
+Tell the user and offer to run the update; do not run it mid-task on
+your own initiative. It repeats at most once a day, so seeing it once
+in a session is expected. Implementation:
+`llm_tool_common/src/llm_tool_common/update_check.py`, called first in
+each core tool's `main()`; `install.sh --update` does the pull.
+
 ## Versioning
 
 Each tool's `pyproject.toml` carries its own version. The tracked

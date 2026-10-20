@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from llm_tool_common.update_check import maybe_check_for_updates
+
 from . import __version__
 from .gerrit import resolve_change
 from .poster import post_results
@@ -1412,6 +1414,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    maybe_check_for_updates()
     sys.exit(args.func(args))
 
 

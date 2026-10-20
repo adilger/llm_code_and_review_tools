@@ -46,6 +46,7 @@ from .config import (
 )
 from .decorators import error_from_exception, handle_errors
 from .click_group import JsonErrorGroup, JsonUsageErrorGroup
+from .update_check import maybe_check_for_updates
 
 __all__ = [
     # Envelope functions
@@ -89,5 +90,7 @@ __all__ = [
     # Click
     "JsonErrorGroup",
     "JsonUsageErrorGroup",
+    # Update check
+    "maybe_check_for_updates",
 ]
 

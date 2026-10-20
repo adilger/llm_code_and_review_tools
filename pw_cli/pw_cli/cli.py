@@ -29,6 +29,7 @@ from llm_tool_common.config import (
 )
 from llm_tool_common.envelope import format_json, success_response
 from llm_tool_common.errors import ErrorCode, ExitCode, ToolError
+from llm_tool_common.update_check import maybe_check_for_updates
 
 TOOL_NAME = "pw-cli"
 DEFAULT_URL = "https://patchwatcher.mulberrytree.us"
@@ -188,6 +189,7 @@ def main(envelope: bool, user: str | None) -> None:
     CHANGE is a change number or a Gerrit URL.  Output is JSON.  What you may
     do is what your tags may: `whoami` says.
     """
+    maybe_check_for_updates()
     global _FULL_ENVELOPE
     _FULL_ENVELOPE = envelope
     try:

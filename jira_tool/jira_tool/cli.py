@@ -19,6 +19,7 @@ from llm_tool_common.config import (
     apply_credential_set,
     hoist_args,
 )
+from llm_tool_common.update_check import maybe_check_for_updates
 
 from .envelope import error_response_from_dict, format_json
 from .errors import ErrorCode, ExitCode
@@ -200,6 +201,7 @@ def main(
       jira -I cloud get EX-13727         # uses 'cloud' instance
       jira --user exa get LU-20002       # uses the [exa] credential set
     """
+    maybe_check_for_updates()
     ctx.ensure_object(dict)
     ctx.obj["pretty"] = pretty
     ctx.obj["envelope"] = envelope

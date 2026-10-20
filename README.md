@@ -70,6 +70,7 @@ Details: [lreview/README.md](lreview/README.md).
 
 ```bash
 ./install.sh            # install all tools, or update them
+./install.sh --update   # pull the latest from GitHub, then install
 ./install.sh --reinstall  # reinstall every tool, changed or not
 ./install.sh --uninstall
 ```
@@ -77,6 +78,29 @@ Details: [lreview/README.md](lreview/README.md).
 Running it again updates: a tool already installed from this checkout
 with the version, dependencies and commands its `pyproject.toml`
 declares is left alone, so only tools that changed go through pip.
+
+**Staying up to date.** The core tools (`gerrit`/`gc`, `jira`,
+`maloo`, `jenkins`, `janitor`, `lreview`, `pw-cli`) check GitHub once a day.
+When `main` there is ahead of this checkout, a command run at a
+terminal asks once a day:
+
+```
+A newer version of the LLM tools is available (local=3507cba, remote=8c1f2e4).
+
+  [y] yes, update now
+  [a] auto-update from now on (still checks daily)
+  [n] not right now (asks again tomorrow)
+  [x] don't ask again (stops checking for updates)
+```
+
+"y" runs `./install.sh --update` and stops; re-run your command.
+Scripts and agents (no terminal) are never prompted and never
+updated: they get one line on stderr, at most daily, and stdout stays
+clean JSON. `--update` refuses a checkout that is on another branch or
+has local changes, so working on the tools themselves is never
+disturbed, and the check stays quiet there too. The choice is kept in
+`~/.config/llm-tools/config.json` (delete it to be asked again);
+`LLM_TOOLS_NO_UPDATE_CHECK=1` turns the check off for a process.
 
 Besides the Python tools, `./install.sh` also initializes git
 submodules and installs drgn if missing (via

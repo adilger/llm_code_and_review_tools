@@ -23,6 +23,7 @@ from llm_tool_common.envelope import (
     success_response,
 )
 from llm_tool_common.errors import exit_code_for
+from llm_tool_common.update_check import maybe_check_for_updates
 
 from .client import MalooClient, resolve_patchset_commit
 from .config import load_config
@@ -117,6 +118,7 @@ class MalooGroup(JsonErrorGroup):
 @click.pass_context
 def main(ctx: click.Context, envelope: bool, user: str | None) -> None:
     """Maloo test results CLI - query Lustre CI test results."""
+    maybe_check_for_updates()
     global _FULL_ENVELOPE
     _FULL_ENVELOPE = envelope
 

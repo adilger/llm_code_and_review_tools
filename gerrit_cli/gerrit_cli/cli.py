@@ -38,6 +38,7 @@ from llm_tool_common.config import (
     argv_option_value,
     hoist_args,
 )
+from llm_tool_common.update_check import maybe_check_for_updates
 
 from .envelope import error_response_from_dict, format_json
 from .errors import ErrorCode, ExitCode
@@ -546,6 +547,7 @@ def main():
     """Main entry point."""
     parser = build_parser()
     args = parser.parse_args()
+    maybe_check_for_updates()
 
     global FULL_ENVELOPE
     FULL_ENVELOPE = getattr(args, "envelope", False)

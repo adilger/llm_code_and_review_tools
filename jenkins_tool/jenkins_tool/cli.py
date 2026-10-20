@@ -21,6 +21,7 @@ from llm_tool_common.envelope import (
 )
 from llm_tool_common.decorators import handle_errors
 from llm_tool_common.errors import ErrorCode, ExitCode, exit_code_for
+from llm_tool_common.update_check import maybe_check_for_updates
 
 from .client import JenkinsClient
 from .config import CREDENTIAL_HINT, load_config
@@ -277,6 +278,7 @@ class JenkinsGroup(JsonUsageErrorGroup):
 @click.pass_context
 def main(ctx: click.Context, envelope: bool, user: str | None) -> None:
     """Jenkins build server CLI - query Lustre CI builds."""
+    maybe_check_for_updates()
     global _FULL_ENVELOPE
     _FULL_ENVELOPE = envelope
 

@@ -16,6 +16,7 @@ from llm_tool_common.envelope import (
     success_response,
 )
 from llm_tool_common.errors import exit_code_for
+from llm_tool_common.update_check import maybe_check_for_updates
 
 from .client import JanitorClient
 from .config import load_config
@@ -223,6 +224,7 @@ def main(ctx: click.Context, envelope: bool) -> None:
     test infrastructure with direct access to console logs, crash data,
     and per-test YAML results.
     """
+    maybe_check_for_updates()
     global _FULL_ENVELOPE
     _FULL_ENVELOPE = envelope
 

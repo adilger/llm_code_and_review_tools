@@ -73,6 +73,11 @@ usage() {
     echo "Options:"
     echo "  --help, -h     Show this help message"
     echo "  --uninstall    Uninstall all tools"
+    echo "  --update       Pull the latest tools from GitHub (fast-forward"
+    echo "                 of main), then install what changed. Refuses on"
+    echo "                 another branch or with local changes. The tools"
+    echo "                 offer this themselves once a day when GitHub is"
+    echo "                 ahead (LLM_TOOLS_NO_UPDATE_CHECK=1 turns that off)"
     echo "  --configure    Walk through the credentials the tools need:"
     echo "                 what each one is for, where to get it, and"
     echo "                 \"not now\" as an answer. Writes only"
@@ -1713,6 +1718,45 @@ $(skill_dests)
 EOF
 }
 
+# --update, first half: fast-forward this checkout to its upstream main.
+# The caller then runs the pulled installer, which reinstalls only the
+# tools whose pyproject.toml changed.  A checkout on a branch, or with
+# local changes, belongs to someone working on the tools: leave it be.
+update_checkout() {
+    cd "$SCRIPT_DIR" || return 1
+    if [ ! -e .git ]; then
+        echo -e "${RED}$SCRIPT_DIR is not a git checkout${NC} -- re-clone to update:"
+        echo "  git clone https://github.com/lustre-tools/llm_code_and_review_tools"
+        return 1
+    fi
+    local branch
+    branch=$(git symbolic-ref --short -q HEAD) || branch=""
+    if [ "$branch" != "main" ]; then
+        echo -e "${RED}Not updating:${NC} $SCRIPT_DIR is on ${branch:-a detached HEAD}, not main."
+        echo "  Switch to main (git switch main) or update it by hand."
+        return 1
+    fi
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        echo -e "${RED}Not updating:${NC} $SCRIPT_DIR has local changes."
+        echo "  Commit or stash them, then re-run: $SCRIPT_DIR/install.sh --update"
+        return 1
+    fi
+    local before after
+    before=$(git rev-parse --short HEAD)
+    echo "Pulling the latest tools into $SCRIPT_DIR..."
+    if ! git pull --ff-only; then
+        echo -e "${RED}git pull --ff-only failed${NC} -- main has diverged from"             "its upstream; resolve that with git."
+        return 1
+    fi
+    after=$(git rev-parse --short HEAD)
+    if [ "$before" = "$after" ]; then
+        echo -e "${GREEN}✓${NC} already up to date ($after)"
+    else
+        echo -e "${GREEN}✓${NC} updated $before -> $after"             "($(git rev-list --count "$before..$after") commits)"
+    fi
+    echo ""
+}
+
 # Allow sourcing the functions without running the installer (tests).  This
 # guard sat above install_ltvm/run_configure/run_doctor, so the three
 # functions that carried the --configure, --doctor and --with-ltvm bugs were
@@ -1720,6 +1764,12 @@ EOF
 if [ -n "${INSTALL_SH_NO_MAIN:-}" ]; then return 0 2>/dev/null || exit 0; fi
 
 # Parse arguments
+# --update re-runs the installer with everything else it was given.
+PASS_ARGS=()
+for _arg in "$@"; do
+    [ "$_arg" = "--update" ] || PASS_ARGS+=("$_arg")
+done
+unset _arg
 ACTION="install"
 WITH_LTVM=0
 VENV_FLAG=0
@@ -1738,6 +1788,9 @@ while [ $# -gt 0 ]; do
             ;;
         --uninstall)
             ACTION="uninstall"
+            ;;
+        --update)
+            ACTION="update"
             ;;
         --configure)
             ACTION="configure"
@@ -1809,6 +1862,12 @@ fi
 case "$ACTION" in
     uninstall)
         uninstall_tools
+        ;;
+    update)
+        update_checkout || exit 1
+        # The pull may have replaced this very script: install with the new
+        # one, so new tools and new install steps take effect now.
+        exec bash "$SCRIPT_DIR/install.sh" ${PASS_ARGS[@]+"${PASS_ARGS[@]}"}
         ;;
     configure)
         configure_rc=0
