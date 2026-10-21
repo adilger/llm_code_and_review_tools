@@ -1,6 +1,6 @@
 ---
 name: release-priority
-description: This skill should be used to see where a Lustre release's priority patches and blockers stand and what an engineer can do to get them landed, with the release-priority CLI and their own Gerrit login - "what's at 2.18 release priority", "what do I need to do for the release", "how can I help get 2.18 out", "which release patches need review", "what are the release blockers", "are any of my patches holding up the release", "what am I reviewing for 2.18", "what's in master-next", "why is this release patch stuck", "218_review_priority", "218_release_blocker". Covers the commands, the statuses and whose move each is, and how to turn the JSON into a clear status page with links.
+description: This skill should be used to see where a Lustre release's priority patches and blockers stand and what an engineer can do to get them landed, with the release-priority CLI and their own Gerrit login - "what's at 2.18 release priority", "what do I need to do for the release", "how can I help get 2.18 out", "which release patches need review", "what are the release blockers", "are any of my patches holding up the release", "what am I reviewing for 2.18", "what's in master-next", "why is this release patch stuck", "218_review_priority", "218_review_blocker". Covers the commands, the statuses and whose move each is, and how to turn the JSON into a clear status page with links.
 version: 0.2.0
 ---
 
@@ -9,7 +9,7 @@ version: 0.2.0
 A Lustre release's **priority changes** are the open Gerrit changes
 carrying its hashtag: `218_review_priority` for 2.18 (the release number
 without dots, plus `_review_priority`).  Its **blockers** carry
-`218_release_blocker` (`_release_blocker`), with or without the priority
+`218_review_blocker` (`_review_blocker`), with or without the priority
 tag; they hold up the release, and come first everywhere.
 `release-priority` gives each change a status and says whose move it
 is, and for the engineer running it, what is theirs to do and where they
@@ -139,4 +139,4 @@ the same rules.
 
 The tool only reads.  It never votes, comments or changes a hashtag.
 Marking a change a blocker is a release manager's call, made in Gerrit
-(`gc hashtag N --add 218_release_blocker`); do not tag changes unasked.
+(`gc hashtag N --add 218_review_blocker`); do not tag changes unasked.

@@ -6,7 +6,7 @@ do to get them landed.
 A release's priority changes are the open changes carrying its Gerrit
 hashtag: `218_review_priority` for 2.18 (the release number without
 dots, plus `_review_priority`), and its blockers those carrying
-`218_release_blocker`, which come first everywhere.  Each gets one status and the people
+`218_review_blocker`, which come first everywhere.  Each gets one status and the people
 whose move it is, by the same rules as the Gerrit Tracker and the public
 page at https://mulberrytree.us/release_priority/.  For 2.18 the tool
 reads that page's `data.json`, rebuilt every minute; for other releases,

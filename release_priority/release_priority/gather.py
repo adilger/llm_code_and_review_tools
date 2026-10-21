@@ -2,7 +2,7 @@
 
 A release's priority changes are the open changes carrying its Gerrit
 hashtag (2.18: 218_review_priority), and its blockers those carrying its
-blocker hashtag (218_release_blocker).  master-next comes from Gerrit's
+blocker hashtag (218_review_blocker).  master-next comes from Gerrit's
 gitiles (the Change-Ids on master..master-next), and a change is behind
 when an earlier open change in its series has a failure of its own.
 """
@@ -32,8 +32,8 @@ def hashtag_for(release: str) -> str:
 
 
 def blocker_hashtag_for(release: str) -> str:
-    """The blocker hashtag of a release: 2.18 -> 218_release_blocker."""
-    return release.replace(".", "") + "_release_blocker"
+    """The blocker hashtag of a release: 2.18 -> 218_review_blocker."""
+    return release.replace(".", "") + "_review_blocker"
 
 
 def change_url(gerrit_url: str, n: int, project: str = PROJECT) -> str:

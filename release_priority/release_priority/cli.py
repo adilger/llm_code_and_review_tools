@@ -3,7 +3,7 @@ engineer can do to get them landed.
 
 A release's priority changes are the open changes carrying its Gerrit
 hashtag (2.18: 218_review_priority), and its blockers those carrying its
-blocker hashtag (218_release_blocker).  Each gets the status the Gerrit
+blocker hashtag (218_review_blocker).  Each gets the status the Gerrit
 Tracker and the public page at https://mulberrytree.us/release_priority/
 give it.  For the page's release the changes come from the page's
 data.json, rebuilt every minute; otherwise, or with --live, or when the
@@ -145,7 +145,7 @@ class Group(JsonErrorGroup):
               help="The release; its hashtag is the number without dots plus _review_priority.")
 @click.option("--hashtag", default=None, help="Use this Gerrit hashtag instead of the release's.")
 @click.option("--blocker-hashtag", default=None,
-              help="Use this blocker hashtag instead of the release's (_release_blocker).")
+              help="Use this blocker hashtag instead of the release's (_review_blocker).")
 @click.option("--live", is_flag=True, help="Read Gerrit rather than the public page's data.")
 @click.pass_context
 def main(ctx: click.Context, envelope: bool, user: str | None, release: str,

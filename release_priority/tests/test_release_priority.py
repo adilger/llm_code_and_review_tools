@@ -124,7 +124,7 @@ class FakeClient:
 def gathered(changes, related=None, mn=()):
     return rg.gather(FakeClient(changes, related), "218_review_priority", "https://g",
                      mn_get=lambda url, path: {"log": [{"message": f"Change-Id: {i}"} for i in mn]},
-                     blocker_hashtag="218_release_blocker")
+                     blocker_hashtag="218_review_blocker")
 
 
 def test_gather_behind_an_untagged_failure():
@@ -222,7 +222,7 @@ def test_cli_release_option(run):
 
 
 def test_blockers():
-    blocker = change(60, hashtags=["218_release_blocker"])
+    blocker = change(60, hashtags=["218_review_blocker"])
     plain = change(61)
     got = gathered([plain, blocker])
     assert [(c["n"], c["release_blocker"]) for c in got["changes"]] == [(60, True), (61, False)]
@@ -239,7 +239,7 @@ def test_blockers():
 def page_data(at=None, **kw):
     """data.json as the tracker writes it."""
     at = at or datetime.now(UTC)
-    d = {"release": "2.18", "hashtag": "218_review_priority", "blocker_hashtag": "218_release_blocker",
+    d = {"release": "2.18", "hashtag": "218_review_priority", "blocker_hashtag": "218_review_blocker",
          "generated_at": at.strftime("%Y-%m-%d %H:%M:%S"),
          "changes": [{"n": 70, "url": "https://g/c/fs/lustre-release/+/70", "subject": "LU-70 a: b",
                       "branch": "master", "ticket": "LU-70", "owner": "Owen", "owner_id": 1,
@@ -254,7 +254,7 @@ def page_data(at=None, **kw):
 
 
 def test_from_page():
-    got = rg.from_page("218_review_priority", "218_release_blocker", get=lambda url: page_data())
+    got = rg.from_page("218_review_priority", "218_review_blocker", get=lambda url: page_data())
     (c,) = got["changes"]
     assert c["status"]["words"] == "Reviewer -1" and c["status"]["why"] == "-1 from Rita"
     assert c["release_blocker"] and c["owner"]["id"] == 1 and got["source"].endswith("data.json")
@@ -266,18 +266,18 @@ def test_from_page():
 
 def test_from_page_not_used():
     old = datetime.now(UTC) - timedelta(hours=1)
-    assert rg.from_page("218_review_priority", "218_release_blocker",
+    assert rg.from_page("218_review_priority", "218_review_blocker",
                         get=lambda url: page_data(at=old)) is None
-    assert rg.from_page("217_review_priority", "217_release_blocker",
+    assert rg.from_page("217_review_priority", "217_review_blocker",
                         get=lambda url: page_data()) is None
 
     def down(url):
         raise ValueError("not json")
-    assert rg.from_page("218_review_priority", "218_release_blocker", get=down) is None
+    assert rg.from_page("218_review_priority", "218_review_blocker", get=down) is None
 
 
 def test_cli_reads_the_page(run, monkeypatch):
-    page = REAL_FROM_PAGE("218_review_priority", "218_release_blocker", get=lambda url: page_data())
+    page = REAL_FROM_PAGE("218_review_priority", "218_review_blocker", get=lambda url: page_data())
     monkeypatch.setattr(rg, "from_page", lambda *a, **k: page)
     rc, d = run("me")
     assert rc == 0 and [c["n"] for c in d["your_move"]] == [70] and d["source"].endswith("data.json")
