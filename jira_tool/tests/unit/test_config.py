@@ -285,6 +285,28 @@ class TestLoadConfig:
         assert config.server == "https://env-server.com"
         assert config.token == "env-token"
 
+    def test_env_cloud_email_selects_basic_auth(self, tmp_path, monkeypatch):
+        """A .env set for a Cloud server with JIRA_CLOUD_EMAIL uses basic auth."""
+        monkeypatch.setenv("JIRA_SERVER", "https://myorg.atlassian.net")
+        monkeypatch.setenv("JIRA_TOKEN", "api-token")
+        monkeypatch.setenv("JIRA_CLOUD_EMAIL", "user@example.com")
+        monkeypatch.setenv("JIRA_CLOUD_ID", "abc-123")
+        config = load_config(config_path=tmp_path / "missing.json")
+        assert config.auth_type == AUTH_TYPE_BASIC
+        assert config.email == "user@example.com"
+        assert config.token == "api-token"
+        assert config.cloud_id == "abc-123"
+
+    def test_env_cloud_email_ignored_for_server(self, tmp_path, monkeypatch):
+        """JIRA_CLOUD_EMAIL set for cloud routing leaves a Server login alone."""
+        monkeypatch.setenv("JIRA_SERVER", "https://jira.example.com")
+        monkeypatch.setenv("JIRA_TOKEN", "pat")
+        monkeypatch.setenv("JIRA_CLOUD_EMAIL", "user@example.com")
+        monkeypatch.delenv("JIRA_CLOUD_ID", raising=False)
+        config = load_config(config_path=tmp_path / "missing.json")
+        assert config.auth_type == AUTH_TYPE_BEARER
+        assert config.email is None
+
     def test_load_from_config_file(self, tmp_path, monkeypatch):
         """Should load from config file when no overrides."""
         # Clear any env vars

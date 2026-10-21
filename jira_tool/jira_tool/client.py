@@ -13,7 +13,7 @@ import requests
 from urllib3.exceptions import ConnectTimeoutError
 
 from .adf import MentionResolver, adf_to_markdown, markdown_to_adf
-from .config import JiraConfig
+from .config import AUTH_TYPE_BASIC, JiraConfig
 from .errors import (
     AuthError,
     ErrorCode,
@@ -127,6 +127,7 @@ class JiraClient:
         self.retry_max_delay = retry_max_delay
         self.debug = debug
         self._session = requests.Session()
+        self._api_root: str | None = None
 
         headers = {
             "Content-Type": "application/json",
@@ -190,10 +191,52 @@ class JiraClient:
         self._debug(f"  -> {response.status_code} "
                      f"({len(response.content)} bytes)")
 
+    CLOUD_GATEWAY = "https://api.atlassian.com/ex/jira"
+
+    def _get_api_root(self) -> str:
+        """Return the URL the REST API lives under.
+
+        An Atlassian API token with scopes is refused by the site URL
+        (401 there, and issues read as missing) and works only through
+        the api.atlassian.com gateway, addressed by the site's cloud id;
+        a classic token works only on the site URL.  Without a
+        configured cloud_id, ask the site who we are: a 401 means a
+        scoped token, so look up the cloud id and use the gateway.
+        """
+        if self._api_root is not None:
+            return self._api_root
+
+        server = self.config.server
+        cloud_id = self.config.cloud_id
+        self._api_root = server
+        if (not self.config.is_cloud or cloud_id == "site" or
+                not self.config.token or
+                self.config.auth_type != AUTH_TYPE_BASIC):
+            return server
+
+        try:
+            if not cloud_id:
+                probe = self._session.get(f"{server}/rest/api/3/myself",
+                                          timeout=self.timeout)
+                if probe.status_code != 401:
+                    return server
+                info = requests.get(f"{server}/_edge/tenant_info",
+                                    timeout=self.timeout)
+                info.raise_for_status()
+                cloud_id = info.json()["cloudId"]
+        except (requests.exceptions.RequestException, ValueError,
+                KeyError) as e:
+            self._debug(f"cloud id lookup failed, using {server}: {e}")
+            return server
+
+        self._api_root = f"{self.CLOUD_GATEWAY}/{cloud_id}"
+        self._debug(f"scoped API token: using {self._api_root}")
+        return self._api_root
+
     def _build_url(self, endpoint: str) -> str:
         """Build full URL for API endpoint."""
         api_version = "3" if self.config.is_cloud else "2"
-        base = f"{self.config.server}/rest/api/{api_version}/"
+        base = f"{self._get_api_root()}/rest/api/{api_version}/"
         return urljoin(base, endpoint.lstrip("/"))
 
     def _calculate_retry_delay(
