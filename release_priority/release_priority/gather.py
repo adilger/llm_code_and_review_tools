@@ -95,21 +95,32 @@ def gather(client, hashtag: str, gerrit_url: str, series: bool = True,
            mn_get=None) -> dict:
     """{changes: [record], master_next_known, generated_at}: every open
     change carrying hashtag, each normalised with its status and group."""
-    tagged = client.search_all(f"hashtag:{hashtag} status:open", max_results=2000,
-                               options=QUERY_OPTIONS)
-    mn = master_next_ids(gerrit_url, mn_get)
+    query = f"hashtag:{hashtag} status:open"
+    below: dict[int, list[int]] = {}
+    extra: dict[int, dict] = {}
+    # The full search is the slow call; master-next and the series are
+    # read alongside it, from a bare search for the change numbers.
+    with ThreadPoolExecutor(WORKERS + 2) as pool:
+        full = pool.submit(client.search_all, query, max_results=2000, options=QUERY_OPTIONS)
+        mn_ids = pool.submit(master_next_ids, gerrit_url, mn_get)
+        if series:
+            nums = [int(d["_number"]) for d in client.search_all(query, max_results=2000,
+                                                                 options=[])]
+            below = dict(zip(nums, pool.map(lambda n: _ancestors(client, n), nums), strict=True))
+            extra = details(client, {a for ancestors in below.values() for a in ancestors}
+                            - set(nums))
+        tagged = full.result()
+        mn = mn_ids.result()
     master_next = frozenset(mn or ())
     patches = {int(d["_number"]): rs.normalize(d, master_next) for d in tagged}
 
     behind: dict[int, int] = {}
     if series and patches:
-        with ThreadPoolExecutor(WORKERS) as pool:
-            below = dict(zip(patches, pool.map(lambda n: _ancestors(client, n), list(patches)), strict=True))
-        extra = {a for ancestors in below.values() for a in ancestors} - set(patches)
-        others = {n: rs.normalize(d, master_next) for n, d in details(client, extra).items()
-                  if d.get("status") == "NEW"}
+        others = {n: rs.normalize(d, master_next) for n, d in extra.items()
+                  if n not in patches and d.get("status") == "NEW"}
         blocker = {n: rs.is_hard_blocker(p) for n, p in {**others, **patches}.items()}
-        for n, ancestors in below.items():
+        for n in patches:
+            ancestors = below.get(n) or []
             if blocker.get(n):
                 continue
             # The first failing change from the base up holds back the rest.
