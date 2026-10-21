@@ -231,3 +231,24 @@ class TestFontFaces:
         from gerrit_dashboard.app import tlc_font_faces
         css = tlc_font_faces(inline=True)
         assert "data:font/woff2;base64," in css and "/static/" not in css
+
+
+class TestReviewCell:
+    """The R slot shows the Code-Review total; blocked reads R ✗."""
+
+    @pytest.mark.parametrize("template", ["dashboard.html", "classic/dashboard.html"])
+    def test_total_and_block(self, tmp_path, template):
+        from flask import render_template
+        from conftest import ME, vote
+        voters = [{"_account_id": 600 + i, "name": f"R{i}"} for i in range(4)]
+        ok = mk_change(number=1, code_review=[vote(voters[0], 1), vote(voters[1], 1),
+                                              vote(voters[2], 1), vote(voters[3], -1)])
+        held = mk_change(number=2, code_review=[vote(voters[0], 1), vote(ME, -1)])
+        cfg = Config(); cfg.data_dir = tmp_path
+        snap = build_snapshot(mk_bundle([(ok, {"mine"}), (held, {"mine"})]), cfg)
+        app = create_app(cfg, start_refresher=False)
+        with app.test_request_context():
+            html = render_template(template, snapshot=snap, refreshing=False, error=None,
+                                   form_error="", static_mode=True, gerrit_url="https://x", user="alex")
+        assert ">R +2/2</span>" in html
+        assert ">R ✗</span>" in html and "not ready yet" in html
