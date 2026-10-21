@@ -225,13 +225,21 @@ Also installed from this repo:
   `/tagger/v1/` routes check with Gerrit. Its roles decide what each
   person may do, as for tags. `pw-admin` is the Authelia-login client
   for everything else.
+- `release-priority`: a release's priority changes (the Gerrit hashtag
+  `218_review_priority` for 2.18), each with the Gerrit Tracker's status
+  and whose move it is. `me` uses gerrit-cli's login to say what is the
+  engineer's to do (their changes that need them, the reviews they owe)
+  and which changes need review; `list`, `master-next` and `show` work
+  without a login. Read only. The same changes are on the public page
+  https://mulberrytree.us/release_priority/. See
+  `release_priority/README.md`.
 
 ## Claude skills
 
 `skills/` holds task-shaped skills for these tools --
 `lustre-ci-triage`, `gerrit-patch-workflow`, `lreview-spin-cycle`,
 `lustre-crash-triage`, `jira-bug-research`, `lustre-debug-logs`,
-`pw-cli`. `./install.sh` links them
+`pw-cli`, `release-priority`. `./install.sh` links them
 into `~/.claude/skills`; `--skills` does only that, `--no-skills`
 skips it. They are symlinks, so edits in this checkout take effect
 immediately -- edit the skill here, not the copy in `~/.claude`.
@@ -243,7 +251,7 @@ carrying the sequencing and judgment that those cannot.
 ## Update notices
 
 The core tools (`gerrit`/`gc`, `jira`, `maloo`, `jenkins`, `janitor`,
-`lreview`, `pw-cli`) check GitHub daily and, when this checkout is behind, print
+`lreview`, `pw-cli`, `release-priority`) check GitHub daily and, when this checkout is behind, print
 one line to stderr:
 
 ```

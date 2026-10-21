@@ -82,7 +82,7 @@ def age(key, by):
 # with the checkout but do not ask.
 CORE_TOOLS = (
     "jira_tool", "gerrit_cli", "maloo_tool", "jenkins_tool", "janitor_tool",
-    "lreview", "pw_cli",
+    "lreview", "pw_cli", "release_priority",
 )
 
 

@@ -89,6 +89,7 @@ COMMANDS = frozenset({
     "janitor",
     "lreview",
     "pw-cli",
+    "release-priority",
 })
 
 DISABLE_ENV = "LLM_TOOLS_NO_UPDATE_CHECK"

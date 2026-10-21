@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Unified installer for LLM Code and Review Tools
-# Installs: jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-cli, and gerrit-dashboard
+# Installs: jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-cli,
+# release-priority, and gerrit-dashboard
 #
 # Run it either way:
 #   ./install.sh [OPTIONS]          # normal run
@@ -62,13 +63,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Console scripts our packages install (used for ~/.local/bin symlinks
 # when installing into a venv, and for cleanup on uninstall)
-TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview pw-cli"
+TOOL_BINS="jira gerrit gerrit-cli gc maloo jenkins janitor lustre-crash lreview pw-cli release-priority"
 
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "       source $0 [OPTIONS]   (activates the venv in your shell)"
     echo ""
-    echo "Install LLM code and review tools (jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-cli, gerrit-dashboard)"
+    echo "Install LLM code and review tools (jira, gerrit-cli, maloo, jenkins, lustre-crash, janitor, lreview, pw-cli, release-priority, gerrit-dashboard)"
     echo ""
     echo "Options:"
     echo "  --help, -h     Show this help message"
@@ -415,6 +416,9 @@ install_tools() {
     fi
     install_tool pw-cli "$SCRIPT_DIR/pw_cli"
 
+    # Install release_priority (needs gerrit_cli)
+    install_tool release-priority "$SCRIPT_DIR/release_priority"
+
     # Install drgn + lustre-drgn-tools
     if [[ "$(uname -s)" == "Darwin" && -z "${LLM_TOOLS_TRY_DRGN:-}" ]]; then
         # drgn ships no macOS wheels, its source build uses Linux-only
@@ -478,6 +482,7 @@ install_tools() {
     echo "  janitor         - Gerrit Janitor test results"
     echo "  lreview         - Parallel AI patch reviews (kreview)"
     echo "  pw-cli          - Patch Watcher by Gerrit login: retest, shepherd, what a tag does"
+    echo "  release-priority - A release's priority patches, and what is yours to do"
     echo ""
     echo "Verify installation:"
     echo "  jira --help"
@@ -488,6 +493,7 @@ install_tools() {
     echo "  janitor --help"
     echo "  lreview check"
     echo "  pw-cli whoami"
+    echo "  release-priority whoami"
     echo ""
     echo "See AGENTS.md for usage documentation."
 }
@@ -534,6 +540,9 @@ uninstall_tools() {
     echo "Uninstalling pw-cli..."
     $PYTHON -m pip uninstall -y pw-cli 2>/dev/null || true
     $PYTHON -m pip uninstall -y pw-retest 2>/dev/null || true
+
+    echo "Uninstalling release-priority..."
+    $PYTHON -m pip uninstall -y release-priority 2>/dev/null || true
 
     echo "Uninstalling gerrit-dashboard..."
     $PYTHON -m pip uninstall -y gerrit-dashboard 2>/dev/null || true
@@ -681,7 +690,7 @@ tool_spec() {
     case "$1" in
         gerrit)
             SPEC_LABEL="Gerrit"
-            SPEC_USED_BY="gerrit (gc), lreview, pw-cli"
+            SPEC_USED_BY="gerrit (gc), lreview, pw-cli, release-priority"
             SPEC_CMD="gerrit"
             SPEC_USER_KEY="GERRIT_USER"
             SPEC_FILE="$HOME/.config/gerrit-cli/.env"
@@ -1525,6 +1534,7 @@ configure_summary() {
     echo ""
     echo "  janitor and lustre-crash need no credentials."
     echo "  pw-cli: uses the Gerrit credentials above; 'pw-cli whoami' checks them."
+    echo "  release-priority: uses them too; 'release-priority whoami' checks them."
     echo "  lreview: run 'lreview setup' -- it reuses the Gerrit credentials"
     echo "           above and walks through the agent CLI and review prompts."
     echo ""

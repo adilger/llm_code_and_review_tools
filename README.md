@@ -80,7 +80,8 @@ with the version, dependencies and commands its `pyproject.toml`
 declares is left alone, so only tools that changed go through pip.
 
 **Staying up to date.** The core tools (`gerrit`/`gc`, `jira`,
-`maloo`, `jenkins`, `janitor`, `lreview`, `pw-cli`) check GitHub once a day.
+`maloo`, `jenkins`, `janitor`, `lreview`, `pw-cli`, `release-priority`) check GitHub once a
+day.
 When `main` there is ahead of this checkout, a command run at a
 terminal asks once a day:
 
