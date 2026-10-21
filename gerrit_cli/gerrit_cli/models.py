@@ -69,9 +69,11 @@ class Comment:
     updated: str
     in_reply_to: Optional[str] = None
     code_context: Optional[CodeContext] = None
+    side: Optional[str] = None
+    range: Optional[dict] = None
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "id": self.id,
             "patch_set": self.patch_set,
             "file_path": self.file_path,
@@ -83,6 +85,11 @@ class Comment:
             "in_reply_to": self.in_reply_to,
             "code_context": self.code_context.to_dict() if self.code_context else None,
         }
+        if self.side:
+            result["side"] = self.side
+        if self.range:
+            result["range"] = self.range
+        return result
 
     def get_gerrit_url(
         self,
@@ -119,6 +126,8 @@ class Comment:
             unresolved=data.get("unresolved", False),
             updated=data.get("updated", ""),
             in_reply_to=data.get("in_reply_to"),
+            side=data.get("side"),
+            range=data.get("range"),
         )
 
 

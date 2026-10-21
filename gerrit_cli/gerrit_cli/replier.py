@@ -3,12 +3,8 @@
 from typing import Any, Optional
 
 from .client import GerritCommentsClient
-from .models import Comment, CommentThread, ExtractedComments, ReplyResult
+from .models import Author, Comment, CommentThread, ExtractedComments, ReplyResult
 from .staging import StagingManager
-
-# Paths every revision has; an inline comment on any other names a file the
-# current revision may no longer have.
-_MAGIC_PATHS = {"/PATCHSET_LEVEL", "/COMMIT_MSG", "/MERGE_LIST"}
 
 
 def _error_text(exc: Exception) -> str:
@@ -20,12 +16,12 @@ def _error_text(exc: Exception) -> str:
     return str(exc)
 
 
-def _reply_revisions(client, change_number, change, comments) -> list[str]:
+def _reply_revisions(change, patch_sets) -> list[str]:
     """The revision to post each reply on, in order.
 
-    Gerrit refuses an inline reply on a revision that no longer has the
-    commented file, so a reply on a file the current revision deleted or
-    renamed goes on the patchset the comment was made on.
+    A reply goes on the patchset its parent comment was made on, as
+    Gerrit's own UI files it: on any later one the thread shows split
+    across patchsets, with its line numbers read against other code.
     """
     current = change.get("current_revision") or "current"
     by_number = {
@@ -33,21 +29,23 @@ def _reply_revisions(client, change_number, change, comments) -> list[str]:
         for sha, info in (change.get("revisions") or {}).items()
         if isinstance(info, dict)
     }
-    files = None
-    revisions = []
-    for comment in comments:
-        revision = current
-        if comment.file_path not in _MAGIC_PATHS:
-            if files is None:
-                try:
-                    files = set(client.get_revision_files(change_number, current))
-                except Exception:
-                    files = set()
-                    by_number = {}
-            if comment.file_path not in files and comment.patch_set in by_number:
-                revision = by_number[comment.patch_set]
-        revisions.append(revision)
-    return revisions
+    return [by_number.get(patch_set, current) for patch_set in patch_sets]
+
+
+def _reply_input(parent: Comment, message: str, mark_resolved: bool) -> dict[str, Any]:
+    """A reply in the parent's thread, at the parent's own location."""
+    comment_input: dict[str, Any] = {
+        "in_reply_to": parent.id,
+        "message": message,
+        "unresolved": not mark_resolved,
+    }
+    if parent.line is not None:
+        comment_input["line"] = parent.line
+    if parent.range:
+        comment_input["range"] = parent.range
+    if parent.side:
+        comment_input["side"] = parent.side
+    return comment_input
 
 
 class CommentReplier:
@@ -87,16 +85,11 @@ class CommentReplier:
         """
         try:
             change = self.client.get_change_detail(change_number)
-            [revision] = _reply_revisions(self.client, change_number, change, [comment])
-
-            self.client.reply_to_comment(
+            [revision] = _reply_revisions(change, [comment.patch_set])
+            self.client.post_review(
                 change_number=change_number,
                 revision_id=revision,
-                file_path=comment.file_path,
-                comment_id=comment.id,
-                message=message,
-                line=comment.line,
-                mark_resolved=mark_resolved,
+                comments={comment.file_path: [_reply_input(comment, message, mark_resolved)]},
             )
 
             return ReplyResult(
@@ -218,10 +211,10 @@ class CommentReplier:
         change_number: int,
         replies: list[dict[str, Any]],
     ) -> list[ReplyResult]:
-        """Post multiple replies, in one review per revision they go on.
+        """Post multiple replies, in one review per patchset they go on.
 
-        That is one review unless a reply is on a file the current revision
-        no longer has (see _reply_revisions).
+        Each reply goes on its parent comment's patchset (see
+        _reply_revisions).
 
         Args:
             change_number: The change number
@@ -236,8 +229,7 @@ class CommentReplier:
         try:
             change = self.client.get_change_detail(change_number)
             revisions = _reply_revisions(
-                self.client, change_number, change,
-                [reply_spec["comment"] for reply_spec in replies],
+                change, [reply_spec["comment"].patch_set for reply_spec in replies],
             )
         except Exception as e:
             error = _error_text(e)
@@ -259,14 +251,9 @@ class CommentReplier:
             for index in indexes:
                 reply_spec = replies[index]
                 comment = reply_spec["comment"]
-                comment_input = {
-                    "in_reply_to": comment.id,
-                    "message": reply_spec["message"],
-                    "unresolved": not reply_spec.get("mark_resolved", False),
-                }
-                if comment.line is not None:
-                    comment_input["line"] = comment.line
-                comments_dict.setdefault(comment.file_path, []).append(comment_input)
+                comments_dict.setdefault(comment.file_path, []).append(_reply_input(
+                    comment, reply_spec["message"], reply_spec.get("mark_resolved", False),
+                ))
 
             error = None
             try:
@@ -331,8 +318,10 @@ class CommentReplier:
     ) -> tuple[bool, str, int]:
         """Push all staged operations for a change.
 
-        Note: Comments are identified by comment_id, so replies will be correctly
-        threaded even if the change has moved to a newer patchset since staging.
+        Each reply goes on its parent comment's patchset, found by the
+        comment_id, so a reply staged before a new patchset still lands in
+        its thread.  One review is posted per patchset; if one fails, the
+        replies not yet posted stay staged.
 
         Args:
             change_number: The change number
@@ -347,7 +336,6 @@ class CommentReplier:
         if staged is None or not staged.operations:
             return False, f"No staged operations for change {change_number}", 0
 
-        # Get current revision for posting
         try:
             change = self.client.get_change_detail(change_number)
             current_revision = change.get("current_revision", "")
@@ -356,8 +344,7 @@ class CommentReplier:
             if current_patchset == 0:
                 return False, f"Error: Could not determine current patchset for change {change_number}", len(staged.operations)
 
-            # Note: No patchset validation needed. Comments are identified by comment_id,
-            # so replies work correctly even if patchset has changed.
+            published = {} if dry_run else self.client.get_comments(change_number)
 
         except ConnectionError as e:
             return False, f"Network error: Could not connect to Gerrit server.\nDetails: {e}", len(staged.operations)
@@ -375,52 +362,65 @@ class CommentReplier:
                 msg += f"  [{op.thread_index}] {location} - {action}: \"{op.message[:50]}...\"\n"
             return True, msg, len(staged.operations)
 
-        # Build comments dict for batch posting
-        comments_dict: dict[str, list[dict[str, Any]]] = {}
-
+        parents = {
+            raw.get("id"): Comment.from_gerrit(path, raw)
+            for path, raws in (published or {}).items()
+            for raw in raws
+        }
+        posts: dict[str, list[tuple[Any, str, dict[str, Any]]]] = {}
         for op in staged.operations:
-            if op.file_path not in comments_dict:
-                comments_dict[op.file_path] = []
-
-            comment_input = {
-                "in_reply_to": op.comment_id,
-                "message": op.message,
-                "unresolved": not op.resolve,
-            }
-
-            if op.line is not None:
-                comment_input["line"] = op.line
-
-            comments_dict[op.file_path].append(comment_input)
-
-        # Push all operations in a single API call
-        try:
-            self.client.post_review(
-                change_number=change_number,
-                revision_id=current_revision,
-                comments=comments_dict,
+            parent = parents.get(op.comment_id) or Comment(
+                id=op.comment_id, patch_set=current_patchset,
+                file_path=op.file_path, line=op.line, message="",
+                author=Author(name=""), unresolved=True, updated="",
+            )
+            [revision] = _reply_revisions(change, [parent.patch_set])
+            posts.setdefault(revision, []).append(
+                (op, parent.file_path, _reply_input(parent, op.message, op.resolve))
             )
 
-            # Success: clear staged file
-            self.staging_manager.clear_staged(change_number)
+        total = len(staged.operations)
+        posted: list[Any] = []
+        for revision, entries in posts.items():
+            comments_dict: dict[str, list[dict[str, Any]]] = {}
+            for _, path, comment_input in entries:
+                comments_dict.setdefault(path, []).append(comment_input)
+            try:
+                self.client.post_review(
+                    change_number=change_number,
+                    revision_id=revision,
+                    comments=comments_dict,
+                )
+            except Exception as e:
+                if posted:
+                    staged.operations = [
+                        op for op in staged.operations
+                        if not any(op is done for done in posted)
+                    ]
+                    self.staging_manager.save_staged(staged)
+                return False, self._push_error(e, change_number, len(posted), total), total
+            posted.extend(op for op, _, _ in entries)
 
-            success_msg = f"✓ Pushed {len(staged.operations)} operations to Change {change_number}"
-            return True, success_msg, len(staged.operations)
+        self.staging_manager.clear_staged(change_number)
+        return True, f"✓ Pushed {total} operations to Change {change_number}", total
 
-        except ConnectionError as e:
-            return False, f"Network error: Could not connect to Gerrit server.\nDetails: {e}\nPlease check your connection and try again.", len(staged.operations)
-        except TimeoutError as e:
-            return False, f"Timeout error: Gerrit server did not respond.\nDetails: {e}\nPlease try again later.", len(staged.operations)
-        except Exception as e:
-            error_msg = f"Error pushing operations: {e}"
-            # Check if it's a common error and provide helpful message
+    @staticmethod
+    def _push_error(e: Exception, change_number: int, posted: int, total: int) -> str:
+        if isinstance(e, ConnectionError):
+            msg = f"Network error: Could not connect to Gerrit server.\nDetails: {e}\nPlease check your connection and try again."
+        elif isinstance(e, TimeoutError):
+            msg = f"Timeout error: Gerrit server did not respond.\nDetails: {e}\nPlease try again later."
+        else:
+            msg = f"Error pushing operations: {_error_text(e)}"
             if "401" in str(e) or "Unauthorized" in str(e):
-                error_msg += "\nPossible cause: Invalid credentials. Check your .env file or environment variables."
+                msg += "\nPossible cause: Invalid credentials. Check your .env file or environment variables."
             elif "403" in str(e) or "Forbidden" in str(e):
-                error_msg += "\nPossible cause: Insufficient permissions for this operation."
+                msg += "\nPossible cause: Insufficient permissions for this operation."
             elif "404" in str(e):
-                error_msg += f"\nPossible cause: Change {change_number} not found or has been deleted."
-            return False, error_msg, len(staged.operations)
+                msg += f"\nPossible cause: Change {change_number} not found or has been deleted."
+        if posted:
+            msg += f"\n{posted} of {total} were posted; the other {total - posted} are still staged."
+        return msg
 
 
 def reply_to_comment(
