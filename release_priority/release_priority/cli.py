@@ -2,9 +2,12 @@
 engineer can do to get them landed.
 
 A release's priority changes are the open changes carrying its Gerrit
-hashtag (2.18: 218_review_priority).  Each gets the status the Gerrit
+hashtag (2.18: 218_review_priority), and its blockers those carrying its
+blocker hashtag (218_release_blocker).  Each gets the status the Gerrit
 Tracker and the public page at https://mulberrytree.us/release_priority/
-give it.  The login is gerrit-cli's, from ~/.config/gerrit-cli/.env (or
+give it.  For the page's release the changes come from the page's
+data.json, rebuilt every minute; otherwise, or with --live, or when the
+page is down or stale, they are read from Gerrit.  The login is gerrit-cli's, from ~/.config/gerrit-cli/.env (or
 GERRIT_URL, GERRIT_USER and GERRIT_PASS); it says who "me" is.  --user
 picks another of its credential sets.
 """
@@ -34,6 +37,7 @@ from . import views
 TOOL_NAME = "release-priority"
 DEFAULT_RELEASE = "2.18"
 DEFAULT_GERRIT = "https://review.whamcloud.com"
+PAGE_ENV = "RELEASE_PRIORITY_DATA_URL"
 
 _FULL_ENVELOPE = False
 
@@ -101,10 +105,17 @@ def identity(c, login: str | None) -> dict:
             "username": a.get("username") or "", "email": a.get("email") or ""}
 
 
-def _gather(release: str, hashtag: str | None, series: bool = True) -> tuple[dict, str]:
-    tag = hashtag or rg.hashtag_for(release)
+def _gather(obj: dict, series: bool = True) -> tuple[dict, str]:
+    """The release's changes: from the public page when it covers them
+    and is fresh, else from Gerrit."""
+    tag = obj["hashtag"] or rg.hashtag_for(obj["release"])
+    blocker = obj["blocker_hashtag"] or rg.blocker_hashtag_for(obj["release"])
+    if not obj["live"] and obj["release"] == views.PAGE_RELEASE:
+        got = rg.from_page(tag, blocker, os.environ.get(PAGE_ENV) or rg.PAGE_DATA_URL)
+        if got:
+            return got, tag
     try:
-        return rg.gather(client(), tag, gerrit_url(), series=series), tag
+        return rg.gather(client(), tag, gerrit_url(), series=series, blocker_hashtag=blocker), tag
     except ToolError:
         raise
     except Exception as exc:
@@ -118,8 +129,9 @@ class Group(JsonErrorGroup):
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         return super().parse_args(
-            ctx, hoist_args(args, flags=("--envelope",),
-                            options=("--user", "-U", "--release", "-r", "--hashtag"))
+            ctx, hoist_args(args, flags=("--envelope", "--live"),
+                            options=("--user", "-U", "--release", "-r", "--hashtag",
+                                     "--blocker-hashtag"))
         )
 
 
@@ -132,9 +144,12 @@ class Group(JsonErrorGroup):
 @click.option("--release", "-r", default=DEFAULT_RELEASE, show_default=True,
               help="The release; its hashtag is the number without dots plus _review_priority.")
 @click.option("--hashtag", default=None, help="Use this Gerrit hashtag instead of the release's.")
+@click.option("--blocker-hashtag", default=None,
+              help="Use this blocker hashtag instead of the release's (_release_blocker).")
+@click.option("--live", is_flag=True, help="Read Gerrit rather than the public page's data.")
 @click.pass_context
 def main(ctx: click.Context, envelope: bool, user: str | None, release: str,
-         hashtag: str | None) -> None:
+         hashtag: str | None, blocker_hashtag: str | None, live: bool) -> None:
     """A Lustre release's priority changes, and what you can do to land them.
 
     Output is JSON.  `me` is the place to start: your changes that need
@@ -149,7 +164,9 @@ def main(ctx: click.Context, envelope: bool, user: str | None, release: str,
             apply_credential_set("gerrit-cli", user)
     except (CredentialSetError, FileNotFoundError) as exc:
         raise _fail(ErrorCode.CONFIG_ERROR, str(exc)) from exc
-    ctx.obj = {"release": release, "hashtag": hashtag}
+    ctx.obj = {"release": release, "hashtag": hashtag, "blocker_hashtag": blocker_hashtag,
+               # Another hashtag than the page's means reading Gerrit.
+               "live": live or bool(hashtag or blocker_hashtag)}
 
 
 @main.command()
@@ -158,7 +175,9 @@ def whoami(obj: dict) -> None:
     """The Gerrit account your login is, and the release and hashtag in use."""
     me = identity(client(), None)
     tag = obj["hashtag"] or rg.hashtag_for(obj["release"])
+    blocker = obj["blocker_hashtag"] or rg.blocker_hashtag_for(obj["release"])
     _emit({"you": me, "gerrit": gerrit_url(), "release": obj["release"], "hashtag": tag,
+           "blocker_hashtag": blocker,
            "web_page": views.web_page(obj["release"])}, "whoami")
 
 
@@ -177,7 +196,7 @@ def me_cmd(obj: dict, login: str | None, show_mn: bool) -> None:
     """
     c = client()
     who = identity(c, login)
-    got, tag = _gather(obj["release"], obj["hashtag"])
+    got, tag = _gather(obj)
     data = views.me_view(got, who, obj["release"], tag, master_next=show_mn)
     nxt = [f"release-priority show {x['n']}" for x in (data["your_move"] + data["reviews_owed"])[:3]]
     _emit(data, "me", nxt + ["release-priority list --group review"])
@@ -188,12 +207,15 @@ def me_cmd(obj: dict, login: str | None, show_mn: bool) -> None:
               help="Only these groups (repeatable).")
 @click.option("--owner", default=None, help="Only changes whose owner's name contains this, "
                                             "or whose username is this.")
-@click.option("--no-series", is_flag=True, help="Skip reading series (faster; no Behind status).")
+@click.option("--blockers", "blockers_only", is_flag=True, help="Only the release blockers.")
+@click.option("--no-series", is_flag=True, help="Reading Gerrit, skip the series (faster; no Behind).")
 @click.pass_obj
-def list_cmd(obj: dict, groups: tuple[str, ...], owner: str | None, no_series: bool) -> None:
+def list_cmd(obj: dict, groups: tuple[str, ...], owner: str | None, blockers_only: bool,
+             no_series: bool) -> None:
     """Every open priority change, grouped as the web page groups them."""
-    got, tag = _gather(obj["release"], obj["hashtag"], series=not no_series)
-    _emit(views.listing(got, obj["release"], tag, groups=set(groups), owner=owner), "list",
+    got, tag = _gather(obj, series=not no_series)
+    _emit(views.listing(got, obj["release"], tag, groups=set(groups), owner=owner,
+                        blockers_only=blockers_only), "list",
           ["release-priority me"])
 
 
@@ -201,7 +223,7 @@ def list_cmd(obj: dict, groups: tuple[str, ...], owner: str | None, no_series: b
 @click.pass_obj
 def master_next_cmd(obj: dict) -> None:
     """The priority changes in master-next, and those ready to land."""
-    got, tag = _gather(obj["release"], obj["hashtag"])
+    got, tag = _gather(obj)
     _emit(views.master_next_view(got, obj["release"], tag), "master-next")
 
 
@@ -214,7 +236,7 @@ def show(obj: dict, change: str) -> None:
         n = int(change.rstrip("/").rsplit("/", 1)[-1])
     except ValueError as exc:
         raise _fail(ErrorCode.INVALID_INPUT, f"Not a change number or URL: {change!r}") from exc
-    got, tag = _gather(obj["release"], obj["hashtag"])
+    got, tag = _gather(obj)
     found = next((x for x in got["changes"] if x["n"] == n), None)
     if not found:
         raise _fail(ErrorCode.NOT_FOUND, f"{n} is not an open change tagged {tag}.",

@@ -1,20 +1,27 @@
 ---
 name: release-priority
-description: This skill should be used to see where a Lustre release's priority patches stand and what an engineer can do to get them landed, with the release-priority CLI and their own Gerrit login - "what's at 2.18 release priority", "what do I need to do for the release", "how can I help get 2.18 out", "which release patches need review", "are any of my patches holding up the release", "what am I reviewing for 2.18", "what's in master-next", "why is this release patch stuck", "218_review_priority". Covers the commands, the statuses and whose move each is, and how to turn the JSON into a clear status page with links.
-version: 0.1.0
+description: This skill should be used to see where a Lustre release's priority patches and blockers stand and what an engineer can do to get them landed, with the release-priority CLI and their own Gerrit login - "what's at 2.18 release priority", "what do I need to do for the release", "how can I help get 2.18 out", "which release patches need review", "what are the release blockers", "are any of my patches holding up the release", "what am I reviewing for 2.18", "what's in master-next", "why is this release patch stuck", "218_review_priority", "218_release_blocker". Covers the commands, the statuses and whose move each is, and how to turn the JSON into a clear status page with links.
+version: 0.2.0
 ---
 
 # Release priorities: what is holding up the release, and how to help
 
 A Lustre release's **priority changes** are the open Gerrit changes
 carrying its hashtag: `218_review_priority` for 2.18 (the release number
-without dots, plus `_review_priority`).  `release-priority` reads them
-from Gerrit, gives each a status and says whose move it is, and for the
-engineer running it, what is theirs to do and where they can help.
+without dots, plus `_review_priority`).  Its **blockers** carry
+`218_release_blocker` (`_release_blocker`), with or without the priority
+tag; they hold up the release, and come first everywhere.
+`release-priority` gives each change a status and says whose move it
+is, and for the engineer running it, what is theirs to do and where they
+can help.
 
 The same changes are on a public web page, rebuilt every minute:
 **https://mulberrytree.us/release_priority/**.  Point the engineer there
-for the whole picture; the CLI is for their own part of it.
+for the whole picture; the CLI is for their own part of it.  For 2.18
+the CLI reads that page's `data.json` (about a second); for other
+releases, with `--live`, or when the page is down or more than 15
+minutes old, it reads Gerrit itself (a few seconds).  `source` in the
+output says which.
 
 Output is JSON, the data payload by default; `--envelope` gives
 `{ok, data, meta, next_actions}`.  Read the JSON; do not pipe it through
@@ -41,19 +48,19 @@ release-priority me --master-next       # ... and the changes in master-next
 release-priority me --as adilger        # someone else's view (username, email or id)
 release-priority list                   # every priority change, grouped as the page
 release-priority list -g review         # one group: review owner ci behind ready master_next
+release-priority list --blockers        # only the release blockers
 release-priority list --owner Dilger    # one owner's
 release-priority master-next            # in master-next, and ready to land
 release-priority show 69572             # one change: status, why, what to do
-release-priority -r 2.17 list           # another release (its hashtag must exist)
+release-priority -r 2.17 list           # another release (its hashtags must exist)
+release-priority me --live              # read Gerrit, not the page
 ```
-
-`me` takes a few seconds: it reads every tagged change, master-next
-and each change's series.
 
 ### What `me` returns
 
 | key | what |
 |---|---|
+| `blockers` | every release blocker: status, whose move, `yours`, `you_review` |
 | `your_move` | your changes that need you, each with `action` and `commands` |
 | `your_changes_in_review` | yours waiting on reviewers; nothing to fix, ping if they sit |
 | `reviews_owed` | changes you review that wait on your vote |
@@ -63,10 +70,11 @@ and each change's series.
 | `suggestions` | one-line next steps, most pressing first |
 | `counts`, `web_page` | the totals, and the page's URL |
 
-Each change has `n`, `url`, `subject`, `ticket`, `ticket_url`, `owner`,
+Every list puts blockers first.  Each change has `n`, `url`, `subject`, `ticket`, `ticket_url`, `owner`,
 `status`, `why`, `whose_move`, `reviewers` (name and vote), `plus` of
 `need` +1s, `unresolved`, `ci`, `quiet_days` (since a person last spoke)
-and, when it applies, `behind` (the change holding it back).
+and, when they apply, `behind` (the change holding it back) and
+`release_blocker`.
 
 ## Presenting it
 
@@ -75,17 +83,21 @@ The engineer wants a status page, not JSON.  Write it as:
 1. **One line of where things stand**: the counts (`counts`), and the web
    page link: "51 open priority changes: 8 need review, 19 wait on their
    owners, 4 in master-next.  Full list: <https://mulberrytree.us/release_priority/>".
-2. **Yours to do** (`your_move`, then `reviews_owed`), most pressing
+2. **Blockers**, when there are any (`blockers`): each as a link with
+   its status and whose move, marking the ones that are theirs or that
+   they review.  Say plainly that these hold up the release.
+3. **Yours to do** (`your_move`, then `reviews_owed`), most pressing
    first.  One line each, with the change as a link and the action:
    `- [62868](https://review.whamcloud.com/c/fs/lustre-release/+/62868) LU-12187 llite: enable FLR EC support: Reviewer -1, answer the -1 from Marc Vef`.
    Offer the `commands` as how to do it.
-3. **Yours, waiting on others** (`your_changes_in_review`,
+4. **Yours, waiting on others** (`your_changes_in_review`,
    `your_other_changes`): brief; say who has the move.
-4. **Where you can help** (`needs_review`): the changes needing review
+5. **Where you can help** (`needs_review`): the changes needing review
    as links, with `plus`/`need` and the reviewer count, those with no
    reviewers or no +1s first.  Any +1 from someone other than the owner
    helps; two are needed on master.
-5. The `suggestions`, in your own words.
+6. The `suggestions`, in your own words.  Mark blockers in every list
+   (**Blocker**).
 
 Every change number is a markdown link to its `url`, and every ticket to
 its `ticket_url`.  Leave out what is empty rather than printing "none"
@@ -126,3 +138,5 @@ the same rules.
   these; do not run them unasked.
 
 The tool only reads.  It never votes, comments or changes a hashtag.
+Marking a change a blocker is a release manager's call, made in Gerrit
+(`gc hashtag N --add 218_release_blocker`); do not tag changes unasked.

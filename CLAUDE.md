@@ -226,8 +226,9 @@ Also installed from this repo:
   person may do, as for tags. `pw-admin` is the Authelia-login client
   for everything else.
 - `release-priority`: a release's priority changes (the Gerrit hashtag
-  `218_review_priority` for 2.18), each with the Gerrit Tracker's status
-  and whose move it is. `me` uses gerrit-cli's login to say what is the
+  `218_review_priority` for 2.18) and blockers (`218_release_blocker`,
+  shown first), each with the Gerrit Tracker's status and whose move it
+  is; for 2.18 it reads the public page's `data.json`, otherwise Gerrit. `me` uses gerrit-cli's login to say what is the
   engineer's to do (their changes that need them, the reviews they owe)
   and which changes need review; `list`, `master-next` and `show` work
   without a login. Read only. The same changes are on the public page

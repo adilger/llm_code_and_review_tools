@@ -1,7 +1,8 @@
 """Read a release's priority changes from Gerrit and give each its status.
 
 A release's priority changes are the open changes carrying its Gerrit
-hashtag (2.18: 218_review_priority).  master-next comes from Gerrit's
+hashtag (2.18: 218_review_priority), and its blockers those carrying its
+blocker hashtag (218_release_blocker).  master-next comes from Gerrit's
 gitiles (the Change-Ids on master..master-next), and a change is behind
 when an earlier open change in its series has a failure of its own.
 """
@@ -28,6 +29,11 @@ TIMEOUT = 60
 def hashtag_for(release: str) -> str:
     """The priority hashtag of a release: 2.18 -> 218_review_priority."""
     return release.replace(".", "") + "_review_priority"
+
+
+def blocker_hashtag_for(release: str) -> str:
+    """The blocker hashtag of a release: 2.18 -> 218_release_blocker."""
+    return release.replace(".", "") + "_release_blocker"
 
 
 def change_url(gerrit_url: str, n: int, project: str = PROJECT) -> str:
@@ -92,10 +98,12 @@ def details(client, numbers) -> dict[int, dict]:
 
 
 def gather(client, hashtag: str, gerrit_url: str, series: bool = True,
-           mn_get=None) -> dict:
+           mn_get=None, blocker_hashtag: str | None = None) -> dict:
     """{changes: [record], master_next_known, generated_at}: every open
-    change carrying hashtag, each normalised with its status and group."""
-    query = f"hashtag:{hashtag} status:open"
+    change carrying hashtag or blocker_hashtag, each normalised with its
+    status and group."""
+    tags = [hashtag] + ([blocker_hashtag] if blocker_hashtag else [])
+    query = "(" + " OR ".join(f"hashtag:{t}" for t in tags) + ") status:open"
     below: dict[int, list[int]] = {}
     extra: dict[int, dict] = {}
     # The full search is the slow call; master-next and the series are
@@ -141,8 +149,67 @@ def gather(client, hashtag: str, gerrit_url: str, series: bool = True,
             except ValueError:
                 quiet = None
         records.append(dict(p, status=st, group=rs.group_of(st), behind=behind.get(n),
+                            release_blocker=bool(blocker_hashtag) and blocker_hashtag in p["hashtags"],
                             quiet_days=quiet, url=change_url(gerrit_url, n, p["project"] or PROJECT)))
     order = list(rs.GROUP_KEYS)
-    records.sort(key=lambda c: (order.index(c["group"]), -(c["quiet_days"] or 0), c["n"]))
+    records.sort(key=lambda c: (order.index(c["group"]), not c["release_blocker"],
+                                -(c["quiet_days"] or 0), c["n"]))
     return {"changes": records, "master_next_known": mn is not None,
-            "generated_at": now.strftime("%Y-%m-%d %H:%M:%S UTC")}
+            "generated_at": now.strftime("%Y-%m-%d %H:%M:%S UTC"), "source": "gerrit"}
+
+
+PAGE_DATA_URL = "https://mulberrytree.us/release_priority/data.json"
+# Older than this, the page's data is not used: its builder has stopped.
+PAGE_STALE_AFTER = 15 * 60
+
+
+def _ascii(s: str | None) -> str:
+    """The page writes a minus sign where the CLI writes a hyphen."""
+    return (s or "").replace("\u2212", "-")
+
+
+def _from_page_row(r: dict) -> dict:
+    """A data.json change as the record gather() makes."""
+    owner = {"name": r["owner"], "id": r.get("owner_id"), "username": ""}
+    whose = [{"name": n, "id": i} for n, i in
+             zip(r.get("whose") or [], r.get("whose_ids") or [], strict=False)]
+    return {
+        "n": r["n"], "url": r["url"], "subject": r["subject"], "branch": r.get("branch") or "",
+        "project": PROJECT, "owner": owner,
+        "status": {"tone": r.get("tone"), "words": _ascii(r["status"]), "why": _ascii(r.get("why")),
+                   "whose": whose, "owner_move": bool(r.get("owner_move"))},
+        "group": r["group"], "behind": r.get("behind"),
+        "reviewers": [{"name": x["name"], "id": x.get("id"), "cr": x.get("vote") or 0,
+                       "bot": False, "review_bot": False} for x in r.get("reviewers") or []],
+        "need": r.get("need") or 2, "unresolved": r.get("unresolved") or 0,
+        "build": (r.get("build") or "none").upper(),
+        "tests": {"state": (r.get("tests") or "none").upper(), "failing": r.get("failing") or 0,
+                  "retesting": bool(r.get("retesting"))},
+        "master_next": bool(r.get("master_next")), "quiet_days": r.get("quiet_days"),
+        "hashtags": r.get("hashtags") or [],
+        "release_blocker": bool(r.get("release_blocker")),
+    }
+
+
+def from_page(hashtag: str, blocker_hashtag: str | None, url: str = PAGE_DATA_URL,
+              get=None) -> dict | None:
+    """What gather() returns, from the public page's data.json, which is
+    rebuilt every minute; None when the page is down, stale or follows
+    other hashtags."""
+    try:
+        if get:
+            d = get(url)
+        else:
+            r = requests.get(url, timeout=15)
+            r.raise_for_status()
+            d = r.json()
+        if d.get("hashtag") != hashtag or (blocker_hashtag and d.get("blocker_hashtag") != blocker_hashtag):
+            return None
+        built = rs.parse_time(d["generated_at"])
+        if (datetime.now(UTC) - built).total_seconds() > PAGE_STALE_AFTER:
+            return None
+        changes = [_from_page_row(c) for c in d.get("changes") or []]
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return None
+    return {"changes": changes, "master_next_known": True,
+            "generated_at": d["generated_at"] + " UTC", "source": url}

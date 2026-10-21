@@ -56,7 +56,20 @@ def record(c: dict) -> dict:
         out["behind"] = c["behind"]
     if c["master_next"]:
         out["master_next"] = True
+    if c.get("release_blocker"):
+        out["release_blocker"] = True
     return out
+
+
+def brief(c: dict) -> dict:
+    """A blocker in the list at the top: what it is and who has the move."""
+    r = record(c)
+    return {k: r[k] for k in ("n", "url", "subject", "ticket", "ticket_url", "owner", "status",
+                              "why", "whose_move", "group")}
+
+
+def blockers_first(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=lambda r: not r.get("release_blocker"))
 
 
 def owner_action(c: dict) -> dict:
@@ -72,6 +85,7 @@ def owner_action(c: dict) -> dict:
 def counts(changes: list[dict]) -> dict:
     out = {k: sum(1 for c in changes if c["group"] == k) for k in rs.GROUP_KEYS}
     out["open"] = len(changes)
+    out["blockers"] = sum(1 for c in changes if c.get("release_blocker"))
     return out
 
 
@@ -82,18 +96,27 @@ def web_page(release: str) -> dict:
                                      "rebuilt every minute."}
 
 
-def listing(got: dict, release: str, hashtag: str, groups=None, owner=None) -> dict:
-    """Everything at the release priority, grouped as the web page groups it."""
+def _about(got: dict, release: str, hashtag: str) -> dict:
+    return {"release": release, "hashtag": hashtag, "generated_at": got["generated_at"],
+            "source": got.get("source", "gerrit"), "web_page": web_page(release)}
+
+
+def listing(got: dict, release: str, hashtag: str, groups=None, owner=None,
+            blockers_only: bool = False) -> dict:
+    """Everything at the release priority, grouped as the web page groups
+    it, blockers first in each group."""
     changes = got["changes"]
+    if blockers_only:
+        changes = [c for c in changes if c.get("release_blocker")]
     if owner:
         o = owner.lower()
         changes = [c for c in changes if o in c["owner"]["name"].lower()
                    or o == (c["owner"].get("username") or "").lower()]
     shown = [g for g in rs.GROUPS if not groups or g[0] in groups]
     return {
-        "release": release, "hashtag": hashtag, "generated_at": got["generated_at"],
-        "web_page": web_page(release),
+        **_about(got, release, hashtag),
         "counts": counts(changes),
+        "blockers": [brief(c) for c in changes if c.get("release_blocker")],
         "master_next_known": got["master_next_known"],
         "groups": [{"key": k, "title": t, "about": a,
                     "changes": [record(c) for c in changes if c["group"] == k]}
@@ -132,30 +155,40 @@ def me_view(got: dict, me: dict, release: str, hashtag: str, master_next: bool =
             others_review.append(dict(r, you_are_reviewer=bool(reviewer),
                                       reviewer_count=len(r["reviewers"]),
                                       action="Review it.", commands=[f"gc review {c['n']}"]))
-    others_review.sort(key=lambda r: (r["reviewer_count"] >= r["need"], r["plus"],
-                                      -(r["quiet_days"] or 0)))
+    others_review.sort(key=lambda r: (not r.get("release_blocker"), r["reviewer_count"] >= r["need"],
+                                      r["plus"], -(r["quiet_days"] or 0)))
+    your_move, in_review, owed, other = (blockers_first(x) for x in (your_move, in_review, owed, other))
 
+    blockers = [dict(brief(c), yours=_is(c["owner"], me),
+                     you_review=any(_is(r, me) for r in rs.humans(c)))
+                for c in changes if c.get("release_blocker")]
     out = {
         "you": {k: me.get(k) for k in ("name", "username", "id")},
-        "release": release, "hashtag": hashtag, "generated_at": got["generated_at"],
-        "web_page": web_page(release),
+        **_about(got, release, hashtag),
         "counts": dict(counts(changes), your_move=len(your_move), your_changes_in_review=len(in_review),
                        reviews_owed=len(owed), needs_review=len(others_review),
                        yours=len(mine)),
+        "blockers": blockers,
         "your_move": your_move,
         "your_changes_in_review": in_review,
         "reviews_owed": owed,
         "needs_review": others_review,
         "your_other_changes": other,
-        "suggestions": suggestions(your_move, in_review, owed, others_review),
+        "suggestions": suggestions(your_move, in_review, owed, others_review, blockers),
     }
     if master_next:
         out["master_next"] = [record(c) for c in changes if c["group"] == "master_next"]
     return out
 
 
-def suggestions(your_move, in_review, owed, others_review) -> list[str]:
+def suggestions(your_move, in_review, owed, others_review, blockers=()) -> list[str]:
     out = []
+    help_wanted = [b for b in blockers if b["group"] in ("review", "owner")]
+    if help_wanted:
+        mine = [b for b in help_wanted if b["yours"] or b["you_review"]]
+        out.append(f"{len(blockers)} release blocker(s), {len(help_wanted)} needing review or "
+                   "their owner; they hold up the release, so they come first"
+                   + (": " + ", ".join(str(b["n"]) for b in mine) + " involve you." if mine else "."))
     if your_move:
         out.append(f"{len(your_move)} of your priority changes need you: start with "
                    f"{your_move[0]['n']} ({your_move[0]['status']}).")
@@ -178,7 +211,7 @@ def suggestions(your_move, in_review, owed, others_review) -> list[str]:
 
 def master_next_view(got: dict, release: str, hashtag: str) -> dict:
     return {
-        "release": release, "hashtag": hashtag, "generated_at": got["generated_at"],
+        **_about(got, release, hashtag),
         "master_next_known": got["master_next_known"],
         "master_next": [record(c) for c in got["changes"] if c["group"] == "master_next"],
         "ready_to_land": [record(c) for c in got["changes"] if c["group"] == "ready"],

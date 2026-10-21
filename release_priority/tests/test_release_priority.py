@@ -1,4 +1,6 @@
 import json
+import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from click.testing import CliRunner
@@ -6,6 +8,8 @@ from click.testing import CliRunner
 from release_priority import cli, views
 from release_priority import gather as rg
 from release_priority import status as rs
+
+REAL_FROM_PAGE = rg.from_page
 
 NOW = "2026-10-01 00:00:00.000000000"
 OWEN = {"_account_id": 1, "name": "Owen", "username": "owen"}
@@ -110,16 +114,17 @@ class FakeClient:
         self.authenticated = True
 
     def search_all(self, q, max_results=500, options=None):
-        if q.startswith("hashtag:"):
-            tag = q.split()[0].split(":", 1)[1]
-            return [c for c in self.changes.values() if tag in c.get("hashtags", [])]
+        if "hashtag:" in q:
+            tags = set(re.findall(r"hashtag:([\w.-]+)", q))
+            return [c for c in self.changes.values() if tags & set(c.get("hashtags", []))]
         nums = {int(t.split(":")[1]) for t in q.split(" OR ")}
         return [c for n, c in self.changes.items() if n in nums]
 
 
 def gathered(changes, related=None, mn=()):
     return rg.gather(FakeClient(changes, related), "218_review_priority", "https://g",
-                     mn_get=lambda url, path: {"log": [{"message": f"Change-Id: {i}"} for i in mn]})
+                     mn_get=lambda url, path: {"log": [{"message": f"Change-Id: {i}"} for i in mn]},
+                     blocker_hashtag="218_release_blocker")
 
 
 def test_gather_behind_an_untagged_failure():
@@ -185,6 +190,7 @@ def run(monkeypatch):
     monkeypatch.setattr(cli, "identity", lambda c, login: {"id": 1, "name": "Owen",
                                                             "username": "owen"})
     monkeypatch.setattr(cli, "maybe_check_for_updates", lambda: None)
+    monkeypatch.setattr(rg, "from_page", lambda *a, **k: None)
 
     def go(*args):
         r = CliRunner().invoke(cli.main, list(args))
@@ -213,3 +219,69 @@ def test_cli_show(run):
 def test_cli_release_option(run):
     rc, d = run("list", "--release", "2.17")
     assert rc == 0 and d["hashtag"] == "217_review_priority" and d["counts"]["open"] == 0
+
+
+def test_blockers():
+    blocker = change(60, hashtags=["218_release_blocker"])
+    plain = change(61)
+    got = gathered([plain, blocker])
+    assert [(c["n"], c["release_blocker"]) for c in got["changes"]] == [(60, True), (61, False)]
+    d = views.listing(got, "2.18", "218_review_priority")
+    assert d["counts"]["blockers"] == 1 and [b["n"] for b in d["blockers"]] == [60]
+    assert d["groups"][0]["changes"][0]["release_blocker"]
+    d = views.listing(got, "2.18", "218_review_priority", blockers_only=True)
+    assert d["counts"]["open"] == 1
+    me = views.me_view(got, {"id": 1, "name": "Owen"}, "2.18", "218_review_priority")
+    assert me["blockers"][0]["yours"] and "60 involve you" in me["suggestions"][0]
+    assert [c["n"] for c in me["your_changes_in_review"]] == [60, 61]
+
+
+def page_data(at=None, **kw):
+    """data.json as the tracker writes it."""
+    at = at or datetime.now(UTC)
+    d = {"release": "2.18", "hashtag": "218_review_priority", "blocker_hashtag": "218_release_blocker",
+         "generated_at": at.strftime("%Y-%m-%d %H:%M:%S"),
+         "changes": [{"n": 70, "url": "https://g/c/fs/lustre-release/+/70", "subject": "LU-70 a: b",
+                      "branch": "master", "ticket": "LU-70", "owner": "Owen", "owner_id": 1,
+                      "status": "Reviewer \u22121", "tone": "bad", "why": "\u22121 from Rita",
+                      "group": "owner", "owner_move": True, "whose": ["Owen"], "whose_ids": [1],
+                      "behind": None, "reviewers": [{"name": "Rita", "id": 2, "vote": -1}],
+                      "plus": 0, "minus": 1, "need": 2, "unresolved": 1, "build": "success",
+                      "tests": "pass", "failing": 0, "retesting": False, "master_next": False,
+                      "quiet_days": 3, "hashtags": ["pt_ecro"], "release_blocker": True}]}
+    d.update(kw)
+    return d
+
+
+def test_from_page():
+    got = rg.from_page("218_review_priority", "218_release_blocker", get=lambda url: page_data())
+    (c,) = got["changes"]
+    assert c["status"]["words"] == "Reviewer -1" and c["status"]["why"] == "-1 from Rita"
+    assert c["release_blocker"] and c["owner"]["id"] == 1 and got["source"].endswith("data.json")
+    me = views.me_view(got, {"id": 1, "name": "Owen"}, "2.18", "218_review_priority")
+    assert me["your_move"][0]["action"].startswith("Answer the -1 from Rita")
+    rita = views.me_view(got, {"id": 2, "name": "Rita"}, "2.18", "218_review_priority")
+    assert rita["your_move"] == [] and rita["blockers"][0]["you_review"]
+
+
+def test_from_page_not_used():
+    old = datetime.now(UTC) - timedelta(hours=1)
+    assert rg.from_page("218_review_priority", "218_release_blocker",
+                        get=lambda url: page_data(at=old)) is None
+    assert rg.from_page("217_review_priority", "217_release_blocker",
+                        get=lambda url: page_data()) is None
+
+    def down(url):
+        raise ValueError("not json")
+    assert rg.from_page("218_review_priority", "218_release_blocker", get=down) is None
+
+
+def test_cli_reads_the_page(run, monkeypatch):
+    page = REAL_FROM_PAGE("218_review_priority", "218_release_blocker", get=lambda url: page_data())
+    monkeypatch.setattr(rg, "from_page", lambda *a, **k: page)
+    rc, d = run("me")
+    assert rc == 0 and [c["n"] for c in d["your_move"]] == [70] and d["source"].endswith("data.json")
+    rc, d = run("me", "--live")
+    assert rc == 0 and [c["n"] for c in d["your_move"]] == [50] and d["source"] == "gerrit"
+    rc, d = run("list", "--hashtag", "other_tag")
+    assert rc == 0 and d["source"] == "gerrit"
