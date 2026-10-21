@@ -261,12 +261,17 @@ includes:
   drawn faded, down to the merged change (or bare master commit, such
   as a release tag) it is based on. Those ancestors are looked up
   when the graph is built, appear only here, and count nowhere.
-- **Review health coloring** for active changes: green (verified OK + 2
-  non-author CR +1s), dark red (CR veto), bright red (Maloo -1), orange
-  (Jenkins -1), pink (other -1), blue (pending). Merged = purple,
-  abandoned = grey.
+- **Review health coloring** for active changes: green (Jenkins and
+  Maloo +1 and a Code-Review total of +2, +1 for a backport), dark red
+  (CR -2 or the owner's -1), bright red (Maloo -1), orange (Jenkins -1),
+  pink (other -1), blue (pending). Merged = purple, abandoned = grey.
+  Code-Review votes add up and a -1 is no veto: three +1s and a -1 make
+  +2. The owner's +1 does not count. A change is blocked only by a -2
+  or by its owner's own -1, which says it is not ready: the reviews do
+  not count then.
 - **Review status line** on each node: verified voters (`J:✓ M:✗`) and
-  code-review summary (`CR: 3×(+1) | 💬4`).
+  the Code-Review total with the votes it adds up from
+  (`CR: +2 = 3×(+1) 1×(-1) | 💬4`).
 - **WIP detection**: changes marked work-in-progress render with a 🚧
   prefix and a dashed border so they stand out from finished patches.
 - **Stale edges** are drawn in orange with dashed lines. Two kinds:

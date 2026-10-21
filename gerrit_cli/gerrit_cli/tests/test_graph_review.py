@@ -378,8 +378,9 @@ class TestParseLabelsCodeReview:
         assert out["cr_rejected_by"] == "Reviewer"
 
     def test_cr_veto_on_any_negative(self):
-        """A -1 (not just -2) sets cr_veto — used by reviewHealth
-        to short-circuit the green verdict."""
+        """A -1 (not just -2) sets cr_veto: any negative vote. The page
+        adds the votes up instead and blocks only on cr_rejected (-2);
+        the field stays for readers of the payload."""
         labels = {"Code-Review": {"all": [
             {"name": "Reviewer", "value": -1},
         ]}}

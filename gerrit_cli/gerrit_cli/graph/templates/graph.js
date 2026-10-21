@@ -139,12 +139,12 @@ for (const child in edgesTo) {
 const sc = G.stats.status_counts;
 const inflight = sc.NEW || 0;
 const unrelatedParents = (G.stats.unrelated_parent_cns || []).length;
-const health = { ready: 0, pending: 0, veto: 0, maloo: 0, jenkins: 0, other: 0 };
+const health = { ready: 0, pending: 0, block: 0, maloo: 0, jenkins: 0, other: 0 };
 for (const n of G.nodes) {
     if (n.status !== 'NEW' || n.unrelated_parent) continue;
     const h = reviewHealth(n);
     if      (h === 'good')        health.ready++;
-    else if (h === 'bad_veto')    health.veto++;
+    else if (h === 'bad_block')   health.block++;
     else if (h === 'bad_maloo')   health.maloo++;
     else if (h === 'bad_jenkins') health.jenkins++;
     else if (h === 'bad_other')   health.other++;
@@ -166,7 +166,7 @@ const chip = (n, label, color) => {
 };
 chip(health.ready,   'ready',   '#3fb950');
 chip(health.pending, 'pending', '#58a6ff');
-chip(health.veto,    'CR veto', '#f85149');
+chip(health.block,   'CR blocked', '#f85149');
 chip(health.maloo,   'Maloo',   '#f85149');
 chip(health.jenkins, 'Jenkins', '#e8a020');
 chip(health.other,   'other -1','#d63384');
@@ -184,15 +184,15 @@ const allRow =
 function selectionRow() {
     const st = selectionCounts();
     const fc = st.status_counts;
-    const fh = { ready: 0, pending: 0, veto: 0, maloo: 0, jenkins: 0, other: 0 };
+    const fh = { ready: 0, pending: 0, block: 0, maloo: 0, jenkins: 0, other: 0 };
     for (const n of G.nodes) {
         if (n.status !== 'NEW' || !focusTracked(n)) continue;
-        const key = { good: 'ready', bad_veto: 'veto', bad_maloo: 'maloo',
+        const key = { good: 'ready', bad_block: 'block', bad_maloo: 'maloo',
                       bad_jenkins: 'jenkins', bad_other: 'other' }[reviewHealth(n)] || 'pending';
         fh[key]++;
     }
     const fchips = [['ready', 'ready', '#3fb950'], ['pending', 'pending', '#58a6ff'],
-        ['veto', 'CR veto', '#f85149'], ['maloo', 'Maloo', '#f85149'],
+        ['block', 'CR blocked', '#f85149'], ['maloo', 'Maloo', '#f85149'],
         ['jenkins', 'Jenkins', '#e8a020'], ['other', 'other -1', '#d63384']]
         .filter(([k]) => fh[k])
         .map(([k, label, color]) => '<span class="health-chip" title="' + fh[k] + ' ' + label + '">'
@@ -1791,7 +1791,7 @@ function getColors() {
         },
         // Review health: overrides STATUS.NEW color for active patches
         REVIEW_GOOD:       { bg: '#238636', border: '#3fb950', font: '#fff' },
-        REVIEW_BAD_VETO:   { bg: '#7a1a1a', border: '#a82828', font: '#fff' },  // CR veto — dark red
+        REVIEW_BAD_BLOCK:  { bg: '#7a1a1a', border: '#a82828', font: '#fff' },  // CR -2 / owner -1 — dark red
         REVIEW_BAD_MALOO:  { bg: '#d32f2f', border: '#f85149', font: '#fff' },  // Maloo -1 — bright red
         REVIEW_BAD_JENKINS:{ bg: '#c47f17', border: '#e8a020', font: '#fff' },  // Jenkins -1 — orange
         REVIEW_BAD_OTHER:  { bg: '#9b2d6e', border: '#d63384', font: '#fff' },  // Other -1 — pink
@@ -1825,7 +1825,7 @@ function legendItems() {
         { kind: 'group', label: 'Nodes' },
         { kind: 'fill', label: 'Ready',       color: C.REVIEW_GOOD.bg },
         { kind: 'fill', label: 'Pending',     color: C.STATUS.NEW.bg },
-        { kind: 'fill', label: 'CR Veto',     color: C.REVIEW_BAD_VETO.bg },
+        { kind: 'fill', label: 'CR -2 / owner -1', color: C.REVIEW_BAD_BLOCK.bg },
         { kind: 'fill', label: 'Maloo',       color: C.REVIEW_BAD_MALOO.bg },
         { kind: 'fill', label: 'Jenkins',     color: C.REVIEW_BAD_JENKINS.bg },
         { kind: 'fill', label: 'Other -1',    color: C.REVIEW_BAD_OTHER.bg },
@@ -1870,8 +1870,31 @@ function renderLegend() {
 const BOT_VOTERS = new Set(['Lustre Gerrit Janitor', 'wc-checkpatch']);
 
 // ─── REVIEW HEALTH ───
+// Code-Review votes add up; a -1 is no veto. The change needs a total
+// of +2 from everyone but its owner, +1 for a backport (a native patch
+// with three +1s and a -1 has its +2). It is blocked only by a -2
+// (Gerrit's "rejected") or by its owner's own -1: the owner says it is
+// not ready, and the reviews do not count until that is lifted.
+function crRequired(node) {
+    return node.is_backport ? 1 : 2;
+}
+// The owner, not the git author, as Gerrit's self-approval rule has it
+// (the author only when the owner is unknown).
+function crOwner(node) {
+    return node.owner || node.author || '';
+}
+function crCounted(node) {
+    return ((node.review || {}).cr_votes || []).filter(v => v.name !== crOwner(node));
+}
+function crOwnerHolds(node) {
+    return ((node.review || {}).cr_votes || []).some(v => v.name === crOwner(node) && v.value < 0);
+}
+function crTotal(node) {
+    return crCounted(node).reduce((sum, v) => sum + v.value, 0);
+}
+
 // Returns: 'good', 'pending', or a specific failure type:
-//   'bad_veto'    — CR -1/-2 (highest priority)
+//   'bad_block'   — CR -2, or the owner's -1 (highest priority)
 //   'bad_maloo'   — Maloo verified -1
 //   'bad_jenkins' — Jenkins verified -1
 //   'bad_other'   — other verified -1
@@ -1879,8 +1902,7 @@ function reviewHealth(node) {
     if (node.status !== 'NEW') return 'pending';
     const rv = node.review || {};
 
-    // CR veto is highest priority (overrides everything)
-    if (rv.cr_veto) return 'bad_veto';
+    if (rv.cr_rejected || crOwnerHolds(node)) return 'bad_block';
 
     // Verified failures: classify by voter name
     if (rv.verified_fail) {
@@ -1892,11 +1914,8 @@ function reviewHealth(node) {
         return 'bad_other';
     }
 
-    // Good: BOTH Jenkins +1 and Maloo +1 AND enough non-owner
-    // CR +1s. The CR threshold depends on whether the patch is a
-    // backport — backports of a master change only need 1
-    // reviewer +1, native patches need 2 (matches patch_status's
-    // rule; see patch_status/classify.py).
+    // Good: BOTH Jenkins +1 and Maloo +1 AND the CR total reached
+    // (crRequired).
     //
     // verified_pass alone ("at least one +1, no -1") is not
     // sufficient: when a CI run simply doesn't fire, it leaves
@@ -1904,12 +1923,6 @@ function reviewHealth(node) {
     // Maloo silent would silently pass that check. A patch can
     // only land when both CIs have voted +1, so both must be
     // present before we paint the node green.
-    //
-    // CR side: only the OWNER's self-vote is excluded —
-    // Gerrit's self-approval rule keys off the owner, not the
-    // git author. A reviewer who happens to be the commit
-    // author still counts. Fall back to author only if owner is
-    // missing (node never enriched).
     if (rv.verified_pass) {
         const passers = new Set(
             (rv.verified_votes || [])
@@ -1919,12 +1932,7 @@ function reviewHealth(node) {
         if (!passers.has('jenkins') || !passers.has('maloo')) {
             return 'pending';
         }
-        const owner = node.owner || node.author || '';
-        const nonOwnerPlus = (rv.cr_votes || []).filter(
-            v => v.value > 0 && v.name !== owner
-        ).length;
-        const required = node.is_backport ? 1 : 2;
-        if (nonOwnerPlus >= required) return 'good';
+        if (crTotal(node) >= crRequired(node)) return 'good';
     }
 
     return 'pending';
@@ -1963,21 +1971,20 @@ function nodeLabel(node) {
             }).join(' ') + ' ';
         }
 
-        // CR summary.
-        const crPlus = (rv.cr_votes || []).filter(v => v.value > 0).length;
-        const crMinus = (rv.cr_votes || []).filter(v => v.value < 0).length;
-        let crStr = '';
-        if (rv.cr_veto) {
-            crStr = '\u2717 VETO';
-        } else if (rv.cr_approved) {
-            crStr = '\u2713 +2';
-        } else if (crPlus > 0 || crMinus > 0) {
-            const parts = [];
-            if (crPlus > 0) parts.push(crPlus + '\u00d7(+1)');
-            if (crMinus > 0) parts.push(crMinus + '\u00d7(-1)');
-            crStr = parts.join(' ');
-        } else {
-            crStr = 'none';
+        // CR summary: the total and the votes it adds up from.
+        const counted = crCounted(node);
+        let crStr = 'none';
+        if (rv.cr_rejected) {
+            crStr = '\u2717 -2';
+        } else if (crOwnerHolds(node)) {
+            crStr = '\u2717 owner -1';
+        } else if (counted.length) {
+            const total = crTotal(node);
+            const parts = [2, 1, -1, -2]
+                .map(val => [val, counted.filter(v => v.value === val).length])
+                .filter(([, n]) => n)
+                .map(([val, n]) => n + '\u00d7(' + (val > 0 ? '+' : '') + val + ')');
+            crStr = (total > 0 ? '+' : '') + total + ' = ' + parts.join(' ');
         }
 
         const cc = rv.unresolved_count || 0;
@@ -2002,7 +2009,7 @@ function nodeLabel(node) {
 function nodeBaseColors(node, flags, C) {
     if (node.status === 'NEW') {
         const health = reviewHealth(node);
-        if (health === 'bad_veto') return C.REVIEW_BAD_VETO;
+        if (health === 'bad_block') return C.REVIEW_BAD_BLOCK;
         if (health === 'bad_maloo') return C.REVIEW_BAD_MALOO;
         if (health === 'bad_jenkins') return C.REVIEW_BAD_JENKINS;
         if (health === 'bad_other') return C.REVIEW_BAD_OTHER;
@@ -2468,8 +2475,8 @@ function renderReviewPanel(node) {
     let healthBadge;
     if (health === 'good') {
         healthBadge = '<span style="color:#3fb950;font-weight:700">\u2713 Ready</span>';
-    } else if (health === 'bad_veto') {
-        healthBadge = '<span style="color:#a82828;font-weight:700">\u2717 CR Veto</span>';
+    } else if (health === 'bad_block') {
+        healthBadge = `<span style="color:#a82828;font-weight:700">\u2717 ${rv.cr_rejected ? 'CR -2' : 'Owner -1'}</span>`;
     } else if (health === 'bad_maloo') {
         healthBadge = '<span style="color:#f85149;font-weight:700">\u2717 Maloo Failed</span>';
     } else if (health === 'bad_jenkins') {
@@ -2514,9 +2521,17 @@ function renderReviewPanel(node) {
     const author = node.author || '';
     let crHtml = '';
     if (rv.cr_rejected) {
-        crHtml = `<div style="color:#f85149;font-weight:700;margin:2px 0">\u2717 VETOED by ${esc(rv.cr_rejected_by)}</div>`;
+        crHtml = `<div style="color:#f85149;font-weight:700;margin:2px 0">\u2717 -2 by ${esc(rv.cr_rejected_by)}: blocks landing</div>`;
+    } else if (crOwnerHolds(node)) {
+        crHtml = `<div style="color:#f85149;font-weight:700;margin:2px 0">\u2717 Owner -1: not ready yet, the reviews do not count</div>`;
     } else if (rv.cr_approved) {
         crHtml = `<div style="color:#3fb950;font-weight:700;margin:2px 0">\u2713 Approved (+2)</div>`;
+    }
+    if (crCounted(node).length && !rv.cr_rejected && !crOwnerHolds(node)) {
+        const total = crTotal(node), required = crRequired(node);
+        crHtml += `<div style="font-size:13px;margin:2px 0;color:${total >= required ? '#3fb950' : 'var(--text)'}">`
+            + `Total ${total > 0 ? '+' : ''}${total} of +${required} needed${node.is_backport ? ' (backport)' : ''}</div>`
+            + `<div style="font-size:11px;color:var(--text-muted)">Votes add up: a -1 lowers the total but does not block. Only a -2 blocks, or the owner's own -1 (not ready yet); the owner's +1 does not count.</div>`;
     }
 
     if (crVotes.length > 0) {

@@ -856,7 +856,7 @@ class TestUnrelatedParents:
 
     def test_it_counts_nowhere_and_says_why_it_is_there(self, tmp_path):
         expr = """JSON.stringify([
-            health.ready + health.pending + health.veto + health.maloo
+            health.ready + health.pending + health.block + health.maloo
                 + health.jenkins + health.other,
             stBuildRecords().map(r => r.id).sort(),
             document.getElementById('legend').innerHTML.includes('Unrelated in-flight parent'),
@@ -1057,6 +1057,73 @@ class TestFocus:
         out = "".join(json.loads(_eval(self._payload(asked=("<b>x</b>",), on=True, tag="<b>x</b>"),
                                        tmp_path, expr)))
         assert "<b>x</b>" not in out and "#&lt;b&gt;x&lt;/b&gt;" in out
+
+
+class TestCodeReviewTotal:
+    """Code-Review votes add up, a -1 is no veto: +2 in total from
+    everyone but the owner (+1 for a backport) with Jenkins and Maloo
+    +1 is ready. Only a -2 or the owner's own -1 (not ready) blocks."""
+
+    CI = [{"name": "Jenkins", "value": 1}, {"name": "Maloo", "value": 1}]
+
+    def _verdicts(self, tmp_path, cases):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01")]
+        for i, (votes, backport, rejected) in enumerate(cases):
+            nodes.append(_node(101 + i, is_backport=backport, review={
+                "verified_votes": self.CI, "verified_pass": True,
+                "cr_votes": [{"name": n, "value": v} for n, v in votes],
+                "cr_rejected": rejected, "cr_rejected_by": "X" if rejected else ""}))
+        payload = _payload(101, nodes, [_edge(10, n["id"]) for n in nodes[1:]])
+        expr = """JSON.stringify(G.nodes.filter(n => n.id > 100).map(n =>
+            [reviewHealth(n), nodeLabel(n).split('| CR: ')[1]]))"""
+        return json.loads(_eval(payload, tmp_path, expr))
+
+    def test_the_votes_add_up(self, tmp_path):
+        r = [("R1", 1), ("R2", 1), ("R3", 1)]
+        cases = [
+            (r + [("R4", -1)], False, False),     # +2 total: ready
+            ([("R1", 1), ("R4", -1)], False, False),
+            ([("R1", 1), ("R2", 1), ("R4", -1)], True, False),   # backport, +1
+            ([("R1", 1), ("R4", -1)], True, False),
+            ([("R4", -1)], False, False),          # a lone -1: pending, not blocked
+            (r, False, True),                      # a -2 blocks
+            ([("R1", 1), ("A", 1)], False, False),  # the owner's +1 does not count
+            ([("G", 2)], False, False),
+            (r + [("A", -1)], False, False),       # the owner's -1 holds it
+            ([("A", -1)], True, False),
+        ]
+        assert self._verdicts(tmp_path, cases) == [
+            ["good", "+2 = 3\u00d7(+1) 1\u00d7(-1)"],
+            ["pending", "0 = 1\u00d7(+1) 1\u00d7(-1)"],
+            ["good", "+1 = 2\u00d7(+1) 1\u00d7(-1)"],
+            ["pending", "0 = 1\u00d7(+1) 1\u00d7(-1)"],
+            ["pending", "-1 = 1\u00d7(-1)"],
+            ["bad_block", "\u2717 -2"],
+            ["pending", "+1 = 1\u00d7(+1)"],
+            ["good", "+2 = 1\u00d7(+2)"],
+            ["bad_block", "\u2717 owner -1"],
+            ["bad_block", "\u2717 owner -1"],
+        ]
+
+    def test_the_panel_says_so(self, tmp_path):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(101, review={"verified_votes": self.CI, "verified_pass": True,
+                                    "cr_votes": [{"name": "R1", "value": 1}, {"name": "R2", "value": 1},
+                                                 {"name": "R3", "value": 1}, {"name": "R4", "value": -1}]})]
+        info = _eval(_payload(101, nodes, [_edge(10, 101)]), tmp_path,
+                     "showNodeInfo(101), document.getElementById('info').innerHTML")
+        assert "Ready" in info and "Total +2 of +2 needed" in info
+        assert "a -1 lowers the total but does not block" in info and "VETO" not in info.upper()
+
+    def test_the_panel_says_the_owner_holds_it(self, tmp_path):
+        nodes = [_node(10, "MERGED", submitted="2026-01-01"),
+                 _node(101, review={"verified_votes": self.CI, "verified_pass": True,
+                                    "cr_votes": [{"name": "R1", "value": 1}, {"name": "R2", "value": 1},
+                                                 {"name": "A", "value": -1}]})]
+        info = _eval(_payload(101, nodes, [_edge(10, 101)]), tmp_path,
+                     "showNodeInfo(101), document.getElementById('info').innerHTML")
+        assert "\u2717 Owner -1</span>" in info and "the reviews do not count" in info
+        assert "Total" not in info
 
 
 class TestPickInTheUrl:
