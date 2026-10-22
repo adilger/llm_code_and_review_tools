@@ -84,6 +84,10 @@ maloo test-history test_1b --branch lustre-reviews
 maloo queue --branch lustre-master
 maloo queue --review 54225
 
+# Prioritize a build's waiting sessions (check first with --dry-run)
+maloo prioritize 134303 --dry-run
+maloo prioritize 134303 --idx 41
+
 # Download test logs (optionally grep inside)
 maloo logs <test_set-UUID>
 maloo logs <test_set-UUID> --grep "test_81a"
@@ -153,6 +157,7 @@ follow-up commands.)
 | `maloo top-failures <branch>` | Most common failing tests on a branch |
 | `maloo test-history <test>` | Pass/fail history for a specific subtest |
 | `maloo queue` | Test queue status; requires at least one filter: `--review`, `--build`, `--branch`, or `--status` |
+| `maloo prioritize <build>` | Prioritize a build's sessions in the test queue, as the queue page's Prioritize does: `--idx N` for one session ("This session"), otherwise the whole build ("Entire build"); `--branch` for a job other than `lustre-reviews`. The page is read first and nothing is sent unless it offers Prioritize there (`PRIORITIZE_NOT_OFFERED`); Maloo offers it to accounts allowed to prioritize, in practice on sessions still Waiting. `QUEUE_ENTRY_NOT_FOUND` (exit 3) when the build or session is not queued. `--dry-run` shows the request without sending it |
 
 ### Logs
 

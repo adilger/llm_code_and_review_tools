@@ -1702,6 +1702,64 @@ def retest(session_url: str, jira_ticket: str, option: str, pretty: bool) -> Non
 
 
 @main.command()
+@click.argument("build", type=int)
+@click.option("--idx", type=int, default=None,
+              help="Prioritize this session of the build (its queue idx, "
+                   "from 'maloo queue'); without it, the whole build")
+@click.option("--branch", "job", type=str, default="lustre-reviews",
+              help="Git branch or Jenkins job of the build "
+                   "(default: lustre-reviews)")
+@click.option("--dry-run", is_flag=True,
+              help="Check the queue and show the request, but do not send it")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON")
+def prioritize(
+    build: int, idx: int | None, job: str, dry_run: bool, pretty: bool,
+) -> None:
+    """Prioritize a build's test sessions in the Maloo test queue.
+
+    Does what the test queue page's Prioritize does: --idx N is "This
+    session", without it "Entire build".  The page is read first and
+    nothing is sent unless it offers Prioritize there.  Maloo decides
+    where: to accounts allowed to prioritize, and in practice on
+    sessions still Waiting for a test cluster.  --dry-run stops after
+    that check.
+
+    \b
+    Examples:
+      maloo prioritize 134303 --dry-run
+      maloo prioritize 134303 --idx 41
+      maloo prioritize 27341 --branch b_es6_0
+    """
+    job = _resolve_branch_to_job(job)
+    client = _make_client()
+    try:
+        result = client.prioritize(
+            job=job, buildno=build, idx=idx, dry_run=dry_run,
+        )
+    except ToolError as exc:
+        _error(exc.code, exc.message, "prioritize", pretty,
+               details=exc.details or None, exit_code=exc.exit_code)
+        return
+    except RuntimeError as exc:
+        _error(ErrorCode.PRIORITIZE_FAILED, str(exc), "prioritize", pretty)
+        return
+    except Exception as exc:
+        _fail(exc, "prioritize", pretty)
+        return
+
+    next_actions = [f"maloo queue --build {build} -- see the build's queue"]
+    if dry_run:
+        prefix = f"maloo prioritize {build}"
+        if idx is not None:
+            prefix += f" --idx {idx}"
+        if job != "lustre-reviews":
+            prefix += f" --branch {job}"
+        next_actions.insert(0, f"{prefix} -- send it")
+    env = success_response(result, TOOL_NAME, "prioritize", next_actions)
+    _output(env, pretty)
+
+
+@main.command()
 @click.argument("test_set_id")
 @click.option("--output-dir", type=str, default=None,
               help="Directory to extract logs into "

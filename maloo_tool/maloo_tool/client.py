@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import requests
 
 from .config import MalooConfig
+from .errors import ErrorCode, NotFoundError, ToolError
 
 CSRF_RE = re.compile(
     r'<meta\s+name="csrf-token"\s+content="([^"]+)"'
@@ -22,6 +23,21 @@ CSRF_RE = re.compile(
 #: links the web UI shows in it for a link nobody has reviewed yet.
 BUG_ROW_RE = re.compile(r"<tr\b.*?</tr>", re.DOTALL)
 REVIEW_HREF_RE = re.compile(r'href="(/buggable_links/validate\?[^"]*)"')
+
+#: A row of the test queue page, and its action cell:
+#: <td class="clickable action priority abandon" data="<job>#<build>#<idx>">.
+#: The page offers Prioritize on a row whose cell has the "priority"
+#: class and Abandon on one with "abandon"; Maloo picks the classes for
+#: the signed-in account and the row's state.
+QUEUE_ROW_RE = re.compile(
+    r'<tr class="(?P<status>[^"]*)">(?P<body>.*?)</tr>', re.DOTALL
+)
+QUEUE_ACTION_RE = re.compile(
+    r'<td class="clickable action(?P<classes>[^"]*)" data="(?P<key>[^"]*)"'
+)
+
+#: Where the queue page's script posts Prioritize and Abandon.
+QUEUE_ACTION_PATH = "/test_queue/actionable"
 
 #: Where Maloo sends a request it has no session for.
 SIGNIN_PATH = "/signin"
@@ -1118,6 +1134,174 @@ class MalooClient:
             raise RuntimeError(f"Retest failed: {m.group(1).strip()}")
 
         return f"HTTP {resp.status_code}"
+
+    # -- Test queue actions (web page script, not REST API) --
+
+    @staticmethod
+    def parse_queue_rows(page: str) -> list[dict[str, Any]]:
+        """The test queue page's sessions and the actions it offers.
+
+        Returns one dict per row that has an action cell: its ``key``
+        (``<job>#<build>#<idx>``, what the page posts), ``job``,
+        ``buildno``, ``idx`` (None when the row has none), ``status``
+        (Waiting, Queued, Testing, ...) and ``actions`` (a sorted subset
+        of "abandon" and "priority").
+        """
+        rows = []
+        for row in QUEUE_ROW_RE.finditer(page):
+            cell = QUEUE_ACTION_RE.search(row.group("body"))
+            if not cell:
+                continue
+            key = cell.group("key")
+            job, build, idx = (key.split("#") + ["", ""])[:3]
+            classes = set(cell.group("classes").split())
+            status = row.group("status").split()
+            rows.append({
+                "key": key,
+                "job": job,
+                "buildno": int(build) if build.isdigit() else build,
+                "idx": int(idx) if idx.isdigit() else None,
+                "status": status[0] if status else "",
+                "actions": sorted(classes & {"abandon", "priority"}),
+            })
+        return rows
+
+    def get_queue_page(
+        self, job: str, buildno: int
+    ) -> tuple[requests.Session, str]:
+        """Sign in and read the test queue page filtered to one build.
+
+        Returns the signed-in web session and the page HTML.
+        """
+        web = self._web_login()
+        resp = self._retried(
+            web.get,
+            f"{self.config.base_url}/test_queue",
+            params={"jobs": job, "builds": buildno,
+                    "commit": "Apply Filter"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return web, resp.text
+
+    def prioritize(
+        self,
+        job: str,
+        buildno: int,
+        idx: int | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Prioritize a build's sessions in the test queue.
+
+        Does what the queue page does when Prioritize is picked on a
+        row: "This session" (``idx`` given) or "Entire build" (no
+        ``idx``).  The page posts ``call=prioritize``, ``kind=idx`` or
+        ``kind=all``, and the ``session`` key of the row picked to
+        /test_queue/actionable.
+
+        The page is read first, and nothing is sent unless it offers
+        Prioritize on that row (for the whole build, on some row of
+        it).  Maloo decides where: to accounts it lets prioritize, and
+        in practice on sessions still waiting for a test cluster.  The
+        post is not retried.
+
+        Args:
+            job: Jenkins job of the build (e.g. "lustre-reviews").
+            buildno: Jenkins build number.
+            idx: The session's queue idx, or None for the whole build.
+            dry_run: Check the page and return the request unsent.
+
+        Returns:
+            The request, whether it was sent, and Maloo's reply.
+
+        Raises:
+            NotFoundError: QUEUE_ENTRY_NOT_FOUND, the build (or that
+                session of it) is not in the test queue.
+            ToolError: PRIORITIZE_NOT_OFFERED, the page does not offer
+                Prioritize there.
+            RuntimeError: the page had no CSRF token.
+        """
+        web, page = self.get_queue_page(job, buildno)
+        rows = [
+            r for r in self.parse_queue_rows(page)
+            if r["job"] == job and r["buildno"] == buildno
+        ]
+        offered = [r for r in rows if "priority" in r["actions"]]
+        statuses: dict[str, int] = {}
+        for r in rows:
+            statuses[r["status"]] = statuses.get(r["status"], 0) + 1
+        details = {"sessions": len(rows), "prioritizable": len(offered),
+                   "statuses": statuses}
+
+        if idx is not None:
+            target = next((r for r in rows if r["idx"] == idx), None)
+            if target is None:
+                raise NotFoundError(
+                    ErrorCode.QUEUE_ENTRY_NOT_FOUND,
+                    f"{job} build {buildno} has no session idx {idx} "
+                    "in the test queue",
+                    details=details,
+                )
+            if "priority" not in target["actions"]:
+                raise ToolError(
+                    ErrorCode.PRIORITIZE_NOT_OFFERED,
+                    f"The test queue does not offer Prioritize for {job} "
+                    f"build {buildno} idx {idx} (status "
+                    f"{target['status'] or 'unknown'}); it offers it on "
+                    f"{len(offered)} of the build's {len(rows)} sessions",
+                    details=details,
+                )
+        else:
+            if not rows:
+                raise NotFoundError(
+                    ErrorCode.QUEUE_ENTRY_NOT_FOUND,
+                    f"{job} build {buildno} has no sessions in the test "
+                    "queue",
+                    details=details,
+                )
+            if not offered:
+                raise ToolError(
+                    ErrorCode.PRIORITIZE_NOT_OFFERED,
+                    f"The test queue does not offer Prioritize on any of "
+                    f"{job} build {buildno}'s {len(rows)} sessions",
+                    details=details,
+                )
+            target = offered[0]
+
+        token = CSRF_RE.search(page)
+        if not token:
+            raise RuntimeError(
+                "Could not extract CSRF token from the test queue page"
+            )
+        data = {
+            "kind": "idx" if idx is not None else "all",
+            "session": target["key"],
+            "call": "prioritize",
+        }
+        result: dict[str, Any] = {
+            "job": job,
+            "buildno": buildno,
+            "idx": idx,
+            "scope": "session" if idx is not None else "build",
+            "request": {"path": QUEUE_ACTION_PATH, "data": data},
+            **details,
+            "sent": False,
+        }
+        if dry_run:
+            return result
+
+        resp = web.post(
+            f"{self.config.base_url}{QUEUE_ACTION_PATH}",
+            data={**data, "authenticity_token": token.group(1)},
+            headers={"X-CSRF-Token": token.group(1),
+                     "X-Requested-With": "XMLHttpRequest"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        result["sent"] = True
+        result["http_status"] = resp.status_code
+        result["response"] = resp.text.strip()[:500]
+        return result
 
     # -- Raise bug (web form, not REST API) --
 
