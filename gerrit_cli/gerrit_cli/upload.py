@@ -1133,6 +1133,63 @@ def _check_signoffs(
     )
 
 
+# Set in an account's credential set ("Name <email>"), it names the person
+# who authors and signs off what that account uploads: a bot that cannot
+# sign the Developer Certificate of Origin itself.
+AUTHOR_VAR = "GERRIT_UPLOAD_AUTHOR"
+
+
+def _check_authorship(new: list[Commit], account: Account) -> None:
+    """Refuse a commit the uploading account wrote as itself.
+
+    With AUTHOR_VAR set, a commit authored by the account, or by the named
+    person without that person's Signed-off-by, or with the account's own
+    Signed-off-by beside theirs, is not uploaded.  Someone else's commit
+    keeps its author.
+    """
+    named = os.environ.get(AUTHOR_VAR, "").strip()
+    found = re.fullmatch(r"(.+?)\s*<([^<>\s]+@[^<>\s]+)>", named)
+    if not named:
+        return
+    if found is None:
+        raise UploadError(
+            ErrorCode.CONFIG_ERROR,
+            f"{AUTHOR_VAR} must be 'Name <email>', not {named!r}.",
+            exit_code=ExitCode.INVALID_INPUT,
+        )
+    person = found.group(2).lower()
+    own = {e.lower() for e in account.emails}
+    bad = []
+    for c in new:
+        signed = {
+            m.group(1).lower()
+            for m in (re.search(r"<([^>]*)>", s) for s in c.signoffs) if m
+        }
+        author = c.author_email.lower()
+        if author in own or (
+            author == person and (person not in signed or signed & own)
+        ):
+            bad.append(c)
+    if not bad:
+        return
+    raise UploadError(
+        ErrorCode.WRONG_AUTHOR,
+        f"Commits uploaded as '{account.username}' are authored by "
+        f"{named}, signed off by them, and carry no Signed-off-by of "
+        f"'{account.username}'. Commits: "
+        + "; ".join(
+            f"{c.label()} [author {c.author_email}, "
+            f"signoffs: {', '.join(c.signoffs) or 'none'}]"
+            for c in bad
+        )
+        + f'. Amend each with `git commit --amend --author="{named}"`, '
+        f"replace its Signed-off-by lines of '{account.username}' with "
+        f"`Signed-off-by: {named}`, and upload again. Nothing was "
+        "rewritten or pushed.",
+        exit_code=ExitCode.INVALID_INPUT,
+    )
+
+
 def _committer_rewrites(
     commits: list[Commit], known: set[str], account: Account, amend: bool
 ) -> list[Commit]:
@@ -1396,6 +1453,7 @@ def upload(
         try:
             _check_range(commits, new, head, series, named, project, branch)
             plan = _plan(client, commits, known, project, branch)
+            _check_authorship(new, account)
             _check_signoffs(new, account)
             rewrite = _committer_rewrites(commits, known, account, amend)
             head_entry = plan[-1]

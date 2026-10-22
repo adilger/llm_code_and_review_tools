@@ -1443,3 +1443,76 @@ def test_finish_without_user_still_pushes_to_the_remote(finishing,
     assert ok, message
     assert pushed_refs(operator_remote) == {"refs/for/master": head}
     assert pushed_refs(bare) == {}
+
+
+# GERRIT_UPLOAD_AUTHOR: a bot account's commits are authored and signed
+# off by the person it names, never by the bot.
+
+PERSON = f"{OPERATOR[0]} <{OPERATOR[1]}>"
+
+
+@pytest.mark.parametrize("author,signoff", [
+    (BOT, BOT),
+    (OPERATOR, BOT),
+    (BOT, OPERATOR),
+])
+def test_a_bot_commit_not_the_persons_is_refused(gerrit, monkeypatch, author, signoff):
+    fake, bare, work = gerrit
+    monkeypatch.setenv("GERRIT_UPLOAD_AUTHOR", PERSON)
+    old = commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT,
+                 author=author, signoff=signoff)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164")
+
+    assert err.value.code == ErrorCode.WRONG_AUTHOR
+    assert f'--author="{PERSON}"' in err.value.message
+    assert git(work, "rev-parse", "HEAD") == old
+    assert pushed_refs(bare) == {}
+
+
+def test_the_bots_signoff_beside_the_persons_is_refused(gerrit, monkeypatch):
+    fake, bare, work = gerrit
+    monkeypatch.setenv("GERRIT_UPLOAD_AUTHOR", PERSON)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT, author=OPERATOR,
+           extra_trailer=f"Signed-off-by: {BOT[0]} <{BOT[1]}>")
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164", dry_run=True)
+
+    assert err.value.code == ErrorCode.WRONG_AUTHOR
+
+
+def test_the_persons_commit_is_uploaded(gerrit, monkeypatch):
+    fake, bare, work = gerrit
+    monkeypatch.setenv("GERRIT_UPLOAD_AUTHOR", PERSON)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT, author=OPERATOR)
+    upload(fake, repo=str(work), change="51164")
+    assert pushed_refs(bare)
+
+
+def test_another_authors_commit_keeps_its_author(gerrit, monkeypatch):
+    """With the bot's sign-off added where it had none of its own."""
+    fake, bare, work = gerrit
+    monkeypatch.setenv("GERRIT_UPLOAD_AUTHOR", PERSON)
+    commit(work, "LU-1 llite: theirs", cid=CID_A, committer=BOT, author=OWNER,
+           signoff=BOT)
+    upload(fake, repo=str(work), change="51164")
+    assert pushed_refs(bare)
+
+
+def test_without_the_setting_nothing_is_asked(gerrit, monkeypatch):
+    fake, bare, work = gerrit
+    monkeypatch.delenv("GERRIT_UPLOAD_AUTHOR", raising=False)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT, author=BOT)
+    upload(fake, repo=str(work), change="51164", dry_run=True)
+
+
+def test_a_malformed_setting_is_a_config_error(gerrit, monkeypatch):
+    fake, bare, work = gerrit
+    monkeypatch.setenv("GERRIT_UPLOAD_AUTHOR", "Patrick Farrell")
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT, author=OPERATOR,
+           signoff=OPERATOR)
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164", dry_run=True)
+    assert err.value.code == ErrorCode.CONFIG_ERROR

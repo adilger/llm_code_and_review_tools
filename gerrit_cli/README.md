@@ -138,6 +138,13 @@ gc --user patrickbot upload 12345 --repo /path/to/checkout
   was meant -- one sitting on the commit it should have replaced, with
   no Change-Id or a new one -- the error ends with a hint asking whether
   `git commit --amend` was meant.
+- **A bot's commits are a person's.** A credential set may name, in
+  `GERRIT_UPLOAD_AUTHOR="Name <email>"`, the person who authors and signs
+  off what that account uploads: a bot cannot sign the Developer
+  Certificate of Origin. The upload then refuses, as `WRONG_AUTHOR`, a
+  new commit authored by the uploading account, or by that person
+  without their `Signed-off-by` or with the account's beside it. Someone
+  else's commit keeps its author.
 - **One Change-Id, one commit.** Two commits in the range with the same
   Change-Id (most often a commit made on top of a patchset of its own
   change instead of amending it) are refused as `DUPLICATE_CHANGE_ID`
