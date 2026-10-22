@@ -540,7 +540,13 @@ by name, email, or username.
 Show everyone on a Gerrit change, reviewers and CCs alike, one entry each.
 
 role is REVIEWER or CC, from Gerrit's own reviewer state; service_user
-marks the accounts Gerrit tags as bots, owner the change owner.
+marks the accounts Gerrit tags as bots. is_bot marks every known bot,
+those Gerrit leaves untagged (aireview, the RISC-V builder) included;
+human_participant_count counts the entries that are not bots. owner marks
+the change owner and commit_author the author of the current patchset's
+commit (matched by email), who may be someone else, e.g. when a bot
+uploads a person's commit. Both are also given at the top level: owner
+and commit_author ({name, email}).
 added_at and added_by say when and by whom each entered the role they
 hold now. approvals is Gerrit's per-label score on the current patchset.
 

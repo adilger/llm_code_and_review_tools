@@ -208,8 +208,11 @@ gc find-user <name>                  gc remove-reviewer <url> <name>
 before adding someone to a change.
 
 `reviewers` lists everyone on the change, CCs included: tell them apart by
-`role` (`REVIEWER` or `CC`), and skip `service_user` accounts (Gerrit's
-bots) and the `owner`. Per person it gives `added_at` (when they took the
+`role` (`REVIEWER` or `CC`), and skip `is_bot` accounts (`service_user`
+misses some bots, aireview among them), the `owner` and the
+`commit_author` (the commit's author, who may be only a CC when a bot
+owns the change). `human_participant_count` is the number of people
+already on the change. Per person it gives `added_at` (when they took the
 role they hold now), `votes` standing on the current patchset,
 `copied_votes` (the ones Gerrit carried forward from an earlier
 patchset), `voted_on_current_patchset`, `last_vote`, and `last_activity`:

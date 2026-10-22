@@ -50,6 +50,7 @@ BOT_USERNAMES = {
     "do-not-reply",
     "hpdd-test-coordinator",
     "lustre-gerrit",
+    "lustre-riscv-builder",
     "mdt-test-coordinator",
 }
 

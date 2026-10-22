@@ -3,6 +3,7 @@
 import re
 import sys
 
+from ..ci_parse import is_bot
 from ..errors import ErrorCode, ExitCode
 from ._helpers import _cli, error_code_for, output_error, output_success
 
@@ -30,7 +31,7 @@ def reviewer_since(updates):
 # One call for roles, dates, votes and messages.
 _DETAIL_OPTIONS = [
     "DETAILED_LABELS", "DETAILED_ACCOUNTS", "REVIEWER_UPDATES", "MESSAGES",
-    "CURRENT_REVISION",
+    "CURRENT_REVISION", "CURRENT_COMMIT",
 ]
 _VOTE_HEADER = re.compile(r"^(?:Patch Set|Uploaded patch set) \d+:(.*?)\.?$")
 _SNIPPET = 160
@@ -169,6 +170,20 @@ def reviewer_removals(updates):
     return removed
 
 
+def commit_author(change):
+    """{name, email} of the current patchset's commit author, or None.
+
+    The author need not own the change (a bot can upload another's
+    commit), and Gerrit names the author by email only.
+    """
+    revisions = change.get("revisions") or {}
+    commit = (revisions.get(change.get("current_revision") or "") or {}).get("commit") or {}
+    author = commit.get("author") or {}
+    if not author.get("email"):
+        return None
+    return {"name": author.get("name", ""), "email": author["email"]}
+
+
 def cmd_reviewers(args):
     """List reviewers and CCs on a change, with role, votes and activity."""
     cli = _cli()
@@ -196,9 +211,16 @@ def cmd_reviewers(args):
         else:
             joined, current, activity = None, None, {}
 
+        author = commit_author(change) if change is not None else None
+        author_email = (author or {}).get("email", "").lower()
+        owner_id = ((change or {}).get("owner") or {}).get("_account_id")
+
         reviewer_list = []
         for r in reviewers:
             reviewer_info = dict(_person(r), approvals=r.get("approvals", {}))
+            # Tag, name or username: aireview and the RISC-V builder are
+            # bots without the SERVICE_USER tag.
+            reviewer_info["is_bot"] = is_bot(r)
             if change is not None:
                 account = r.get("_account_id")
                 added_at, added_by = joined.get(account, (None, None))
@@ -212,6 +234,10 @@ def cmd_reviewers(args):
                     "in_attention_set": False, "has_current_vote": False,
                     "copied_votes": [], "voted_on_current_patchset": False,
                 })
+                reviewer_info["owner"] = account == owner_id
+                reviewer_info["commit_author"] = bool(
+                    author_email
+                    and (r.get("email") or "").lower() == author_email)
             reviewer_list.append(reviewer_info)
 
         data = {
@@ -224,6 +250,12 @@ def cmd_reviewers(args):
             data["reviewer_count"] = sum(
                 1 for r in reviewer_list if r["role"] == "REVIEWER")
             data["cc_count"] = sum(1 for r in reviewer_list if r["role"] == "CC")
+            # Everyone listed who is not a bot: the people already on the
+            # change, owner and commit author included when listed.
+            data["human_participant_count"] = sum(
+                1 for r in reviewer_list if not r["is_bot"])
+            data["owner"] = _person((change or {}).get("owner") or {})
+            data["commit_author"] = author
             listed = {r["account_id"] for r in reviewer_list}
             data["removed"] = [
                 dict(_person(account), removed_at=at, removed_by=by,

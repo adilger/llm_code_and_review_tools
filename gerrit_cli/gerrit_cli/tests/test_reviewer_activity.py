@@ -212,3 +212,80 @@ def test_reviewers_still_answers_without_inline_comments(monkeypatch, capsys):
     andreas = {r["username"]: r for r in data["reviewers"]}["adilger"]
     assert andreas["last_activity"]["kind"] == "message"
     assert andreas["comment_count"] == 0
+
+
+BOT_OWNER = {"_account_id": 20, "name": "Patrick Farrell Bot",
+             "username": "patrickbot", "email": "bot@example.com"}
+PATRICK = {"_account_id": 21, "name": "Patrick Farrell",
+           "username": "pfarrell", "email": "Patrick@Example.com"}
+RISCV = {"_account_id": 22, "name": "Lustre RISC-V Builder",
+         "username": "lustre-riscv-builder"}
+RISCV_BY_USERNAME = {"_account_id": 23, "name": "riscv",
+                     "username": "lustre-riscv-builder"}
+
+
+class AuthorIsACcClient(FakeClient):
+    """A bot owns the change; the commit's author is only a CC."""
+
+    def __init__(self):
+        super().__init__(change={
+            "owner": BOT_OWNER,
+            "current_revision": "c",
+            "revisions": {"c": {"_number": 2, "commit": {"author": {
+                "name": "Patrick Farrell", "email": "patrick@example.com"}}}},
+            "reviewers": {"REVIEWER": [BOT_OWNER, ANDREAS, RISCV,
+                                       RISCV_BY_USERNAME],
+                          "CC": [PATRICK, AIREVIEW]},
+            "labels": {}, "reviewer_updates": [], "messages": [],
+        })
+
+    def get_change(self, change_number, options=None):
+        assert "CURRENT_COMMIT" in options
+        return super().get_change(change_number, options)
+
+    def get_reviewers(self, change_number):
+        return [dict(person, approvals={}) for person in
+                (BOT_OWNER, ANDREAS, RISCV, RISCV_BY_USERNAME, PATRICK,
+                 AIREVIEW)]
+
+    def get_comments(self, change_number):
+        return {}
+
+
+def test_reviewers_mark_owner_commit_author_and_bots(monkeypatch, capsys):
+    """An agent took the commit author, listed as a CC with owner false, for
+    someone not yet on the change, and had to classify aireview and the
+    RISC-V builder (service_user false) as bots by hand."""
+    data = _run(monkeypatch, capsys, AuthorIsACcClient())
+    by_name = {r["username"]: r for r in data["reviewers"]}
+
+    patrick = by_name["pfarrell"]
+    assert patrick["role"] == "CC"
+    assert patrick["commit_author"] is True
+    assert patrick["owner"] is False
+    assert by_name["patrickbot"]["owner"] is True
+    assert by_name["patrickbot"]["commit_author"] is False
+    assert data["commit_author"] == {"name": "Patrick Farrell",
+                                     "email": "patrick@example.com"}
+    assert data["owner"]["username"] == "patrickbot"
+
+    assert by_name["aireview"]["service_user"] is False
+    assert by_name["aireview"]["is_bot"] is True
+    assert {r["account_id"] for r in data["reviewers"] if r["is_bot"]} == {
+        7, 22, 23}
+    assert by_name["adilger"]["is_bot"] is False
+    # patrickbot, Andreas and Patrick: the bot owner is not tagged or
+    # named as a bot, so it counts; aireview and the builders do not.
+    assert data["human_participant_count"] == 3
+
+
+def test_reviewers_is_bot_follows_the_service_user_tag(monkeypatch, capsys):
+    data = _run(monkeypatch, capsys, FakeClient())
+    by_name = {r["username"]: r for r in data["reviewers"]}
+    assert by_name["jenkins"]["is_bot"] is True
+    assert by_name["aireview"]["is_bot"] is True
+    # mvef, adilger, bobijam
+    assert data["human_participant_count"] == 3
+    # No commit in the change detail: no author to name.
+    assert data["commit_author"] is None
+    assert not any(r["commit_author"] for r in data["reviewers"])
