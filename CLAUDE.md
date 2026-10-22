@@ -98,8 +98,10 @@ if several are open the error lists them.
 
 **Key commands:**
 - **Review:** `gc comments <url>`,
-  `gc reply <idx> "msg" [--url <url>]` (URL defaults to the one
-  remembered from the last `gc comments`), `gc review <url>`,
+  `gc reply <idx|comment_id> "msg" [--url <url>]` (URL defaults to
+  the one remembered from the last `gc comments`; indices shift as
+  threads resolve, so use the thread's `root_comment.id` for more
+  than one reply), `gc review <url>`,
   `gc done <url> <idx>`, `gc ack <url> <idx>`
 - **Post review from JSON:** `gc review --post-comments <file> <url>`
   posts a cover message + inline line comments in one call. The file

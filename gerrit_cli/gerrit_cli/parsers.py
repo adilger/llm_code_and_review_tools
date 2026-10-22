@@ -25,6 +25,23 @@ def thread_index(value: str) -> int:
     return index
 
 
+def thread_index_or_comment_id(value: str) -> int | str:
+    """A thread index as 'comments' numbers them, or a comment id.
+
+    Digits alone are an index; anything else is a Gerrit comment id
+    ("fe4b1c39_3f8c9a2e", or a UUID), which never is digits alone.  An
+    index names a place in the unresolved listing, which shifts as
+    threads are resolved; a comment id names the thread for good.
+    """
+    text = value.strip()
+    if text.isdigit():
+        return thread_index(text)
+    if not text or text.startswith("-") or any(c.isspace() for c in text):
+        raise argparse.ArgumentTypeError(
+            f"invalid thread index or comment id: {value!r}")
+    return text
+
+
 def add_extract_parser(subparsers):
     """Add the 'comments' subcommand parser (with 'extract' as alias)."""
     parser = subparsers.add_parser(
@@ -107,12 +124,21 @@ def add_reply_parser(subparsers):
     parser = subparsers.add_parser(
         "reply",
         help="Reply to a comment",
-        description="Reply to a comment thread. URL is optional if you recently ran 'gc comments'.",
+        description=(
+            "Reply to a comment thread. URL is optional if you recently ran "
+            "'gc comments'. The thread is its index in the 'comments' "
+            "listing, or the id of a comment in it (root_comment.id). "
+            "Indices shift as threads are resolved, so for more than one "
+            "reply use comment ids, or 'gc batch'."
+        ),
     )
     parser.add_argument(
         "thread_index",
-        type=thread_index,
-        help="Thread index from 'comments' output",
+        metavar="thread",
+        type=thread_index_or_comment_id,
+        help="Thread index from 'comments' output, or a comment id in the "
+             "thread (root_comment.id); the id does not shift as threads "
+             "are resolved",
     )
     parser.add_argument(
         "message",

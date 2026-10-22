@@ -54,11 +54,17 @@ listing is everything.
 
 ```bash
 gc reply 0 --done                 # 'Done' + resolve, on the remembered URL
-gc reply 1 "Fixed in PS4"
 gc reply 2 --ack
+gc reply 8468c1b7_1b15e7ef "Fixed in PS4"   # by the thread's root_comment.id
 gc done <url> <idx>               # same as reply --done
 gc ack <url> <idx>
 ```
+
+An index is looked up afresh each time in the unresolved listing, so once
+a reply resolves thread 0, every later index shifts down by one and a
+second `gc reply 1` lands on what `gc comments` showed as 2. For more than
+one reply, address threads by `root_comment.id` (each thread's `index` and
+`root_comment.id` are in `gc comments`), or use `gc batch` below.
 
 For several replies at once, stage them, look at them, then push:
 

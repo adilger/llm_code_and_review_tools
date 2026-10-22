@@ -440,6 +440,7 @@ includes:
 comments <URL>                   # Get unresolved comments
 comments <URL> --all --include-system  # Every review message too: votes, uploads, CI
 reply <thread_index> "msg"       # Reply to a comment
+reply <comment_id> "msg"         # Same, by root_comment.id (stable; use for several)
 reply <thread_index> --done      # Mark as done
 done <URL> <idx>                 # Mark as done (shortcut for 'reply --done')
 ack <URL> <idx>                  # Acknowledge (shortcut for 'reply --ack')

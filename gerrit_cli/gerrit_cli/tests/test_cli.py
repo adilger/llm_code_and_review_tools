@@ -2547,3 +2547,113 @@ class TestSashikoBridgeErrors:
             submit_to_sashiko("http://127.0.0.1:9", "a" * 40)
 
         assert isinstance(err.value.__cause__, requests.ConnectionError)
+
+
+class TestReplyByCommentId:
+    """`gc reply` takes a comment id, which does not shift as threads resolve.
+
+    An index is looked up afresh in the unresolved listing each time: after
+    `gc reply 0 ... --resolve`, `gc reply 1` answered what `gc comments` had
+    shown as thread 2.
+    """
+
+    @staticmethod
+    def _parser():
+        from gerrit_cli import cli
+        from gerrit_cli.parsers import setup_parsers
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(
+            dest="command", parser_class=cli._JsonErrorParser)
+        setup_parsers(subparsers, cli.build_handlers())
+        return parser
+
+    @pytest.mark.parametrize("value, expected", [
+        ("0", 0),
+        ("12", 12),
+        ("fe4b1c39_3f8c9a2e", "fe4b1c39_3f8c9a2e"),
+        ("3c2f7a1e-5b6d-4e8f-9a0b-1c2d3e4f5a6b",
+         "3c2f7a1e-5b6d-4e8f-9a0b-1c2d3e4f5a6b"),
+    ])
+    def test_parser_takes_index_or_comment_id(self, value, expected):
+        args = self._parser().parse_args(["reply", value, "Fixed"])
+        assert args.thread_index == expected
+        assert type(args.thread_index) is type(expected)
+
+    @staticmethod
+    def _thread(*ids, unresolved=True):
+        comments = [
+            Comment(id=cid, patch_set=1, file_path="f.c", line=n + 1,
+                    message=cid, author=Author(name="R"),
+                    unresolved=unresolved, updated="2026-10-01")
+            for n, cid in enumerate(ids)
+        ]
+        return CommentThread(root_comment=comments[0], replies=comments[1:])
+
+    def test_reply_by_id_after_an_earlier_reply_resolved_a_thread(self):
+        from gerrit_cli.cli import cmd_reply
+
+        first = self._thread("t0", unresolved=False)   # resolved by reply 0
+        second = self._thread("t1", "t1-reply")
+        third = self._thread("t2")
+
+        def extract(**kwargs):
+            result = MagicMock()
+            result.hidden_resolved_count = 0
+            if kwargs.get("include_resolved"):
+                result.threads = [first, second, third]
+            else:
+                result.threads = [second, third]
+            return result
+
+        args = self._parser().parse_args(
+            ["reply", "--url", "https://example.com/12345", "t1", "Fixed",
+             "--resolve"])
+        with patch('gerrit_cli.cli.GerritCommentsClient') as MockClient, \
+             patch('gerrit_cli.cli.extract_comments', side_effect=extract), \
+             patch('gerrit_cli.cli.CommentReplier') as MockReplier, \
+             pytest.raises(SystemExit) as exc_info:
+            MockClient.parse_gerrit_url.return_value = (
+                "https://example.com", 12345)
+            MockReplier.return_value.reply_to_thread.return_value = MagicMock(
+                success=True, to_dict=lambda: {"success": True})
+            cmd_reply(args)
+
+        assert exc_info.value.code == 0
+        call = MockReplier.return_value.reply_to_thread.call_args
+        assert call.kwargs["thread"] is second
+        assert call.kwargs["mark_resolved"] is True
+
+    def test_unknown_comment_id_posts_nothing(self, capsys):
+        from gerrit_cli.cli import cmd_reply
+
+        result = MagicMock()
+        result.threads = [self._thread("t0")]
+        args = self._parser().parse_args(
+            ["reply", "--url", "https://example.com/12345", "nope_1", "x"])
+        with patch('gerrit_cli.cli.GerritCommentsClient') as MockClient, \
+             patch('gerrit_cli.cli.extract_comments', return_value=result), \
+             patch('gerrit_cli.cli.CommentReplier') as MockReplier, \
+             pytest.raises(SystemExit) as exc_info:
+            MockClient.parse_gerrit_url.return_value = (
+                "https://example.com", 12345)
+            cmd_reply(args)
+
+        assert exc_info.value.code == 3
+        MockReplier.return_value.reply_to_thread.assert_not_called()
+        assert json.loads(capsys.readouterr().out)["code"] == "COMMENT_NOT_FOUND"
+
+    def test_comments_json_numbers_each_thread(self):
+        from gerrit_cli.models import ChangeInfo, ExtractedComments
+
+        extracted = ExtractedComments(
+            change_info=ChangeInfo(
+                change_id="I1", change_number=1, project="p", branch="b",
+                subject="s", status="NEW", current_revision="r",
+                owner=Author(name="O"), url="u"),
+            threads=[self._thread("t0"), self._thread("t1")],
+            unresolved_count=2, total_count=2,
+        )
+        threads = extracted.to_dict()["threads"]
+        assert [(t["index"], t["root_comment"]["id"]) for t in threads] == [
+            (0, "t0"), (1, "t1")]

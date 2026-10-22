@@ -200,7 +200,12 @@ class ExtractedComments:
     def to_dict(self) -> dict:
         d = {
             "change_info": self.change_info.to_dict(),
-            "threads": [t.to_dict() for t in self.threads],
+            # The index each thread has here, which reply/done/ack/stage
+            # take.  It shifts as threads are resolved; root_comment.id
+            # does not, and 'gc reply' takes it too.
+            "threads": [
+                {"index": i, **t.to_dict()} for i, t in enumerate(self.threads)
+            ],
             "unresolved_count": self.unresolved_count,
             "total_count": self.total_count,
             "review_messages": [m.to_dict() for m in self.review_messages],

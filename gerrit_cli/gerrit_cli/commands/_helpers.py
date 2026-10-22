@@ -181,7 +181,7 @@ def thread_index_error(result: Any, index: int) -> str | None:
             f"Thread {index} is a resolved thread that only 'gc comments "
             f"--all' lists; reply, done, ack and stage take the {shown} "
             "thread(s) the default listing shows. To answer it, use "
-            "'gc batch' with its comment_id."
+            "'gc reply <comment_id>' or 'gc batch' with its comment_id."
         )
     return None
 

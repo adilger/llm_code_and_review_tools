@@ -93,7 +93,7 @@ def cmd_extract(args):
         output_success(
             data, command, pretty,
             next_actions=[
-                "gc reply <INDEX> \"<message>\" -- reply to a thread",
+                "gc reply <INDEX|COMMENT_ID> \"<message>\" -- reply to a thread (use the root comment id for more than one reply: indices shift as threads resolve)",
                 "gc reply --done <INDEX> -- mark a thread as done",
                 "gc stage --done <INDEX> -- stage a 'done' reply for later",
                 "gc review <URL> -- view code diffs",
@@ -105,6 +105,50 @@ def cmd_extract(args):
         sys.exit(output_error(ErrorCode.INVALID_INPUT, str(e), command, pretty))
     except Exception as e:
         sys.exit(output_error(error_code_for(e), f"Error extracting comments: {e}", command, pretty))
+
+
+def _thread_by_index(cli, url, index, command, pretty):
+    """The thread at index in the default (unresolved) listing, or exit."""
+    result = cli.extract_comments(
+        url=url,
+        include_resolved=False,
+        include_code_context=False,
+    )
+    if index >= len(result.threads):
+        if len(result.threads) == 0:
+            msg = (
+                "No unresolved comment threads on this change. "
+                "To post a top-level review comment use: gc message <URL> \"<text>\""
+            )
+        else:
+            msg = f"Thread index {index} out of range. Only {len(result.threads)} threads."
+        msg = thread_index_error(result, index) or msg
+        sys.exit(output_error(
+            ErrorCode.THREAD_INDEX_OUT_OF_RANGE,
+            msg,
+            command, pretty
+        ))
+    return result.threads[index]
+
+
+def _thread_by_comment_id(cli, url, comment_id):
+    """The thread holding comment_id, or None.
+
+    Looked for among every thread, resolved and bots' included, as 'gc
+    batch' does: an id names its thread whatever has been resolved since
+    the listing it came from, where an index does not.
+    """
+    everything = cli.extract_comments(
+        url=url,
+        include_resolved=True,
+        include_code_context=False,
+        exclude_ci_bots=False,
+        exclude_lint_bots=False,
+    )
+    for thread in everything.threads:
+        if any(comment.id == comment_id for comment in thread.all_comments):
+            return thread
+    return None
 
 
 def cmd_reply(args):
@@ -128,29 +172,18 @@ def cmd_reply(args):
         # Parse URL to get change number
         base_url, change_number = cli.GerritCommentsClient.parse_gerrit_url(url)
 
-        # Extract to get the threads
-        result = cli.extract_comments(
-            url=url,
-            include_resolved=False,
-            include_code_context=False,
-        )
-
-        if args.thread_index >= len(result.threads):
-            if len(result.threads) == 0:
-                msg = (
-                    "No unresolved comment threads on this change. "
-                    "To post a top-level review comment use: gc message <URL> \"<text>\""
-                )
-            else:
-                msg = f"Thread index {args.thread_index} out of range. Only {len(result.threads)} threads."
-            msg = thread_index_error(result, args.thread_index) or msg
-            sys.exit(output_error(
-                ErrorCode.THREAD_INDEX_OUT_OF_RANGE,
-                msg,
-                command, pretty
-            ))
-
-        thread = result.threads[args.thread_index]
+        if isinstance(args.thread_index, str):
+            thread = _thread_by_comment_id(cli, url, args.thread_index)
+            if thread is None:
+                sys.exit(output_error(
+                    ErrorCode.COMMENT_NOT_FOUND,
+                    f"No comment {args.thread_index!r} on this change. "
+                    "Comment ids are the 'id' fields in 'gc comments' "
+                    "(root_comment.id names the thread).",
+                    command, pretty
+                ))
+        else:
+            thread = _thread_by_index(cli, url, args.thread_index, command, pretty)
 
         # Determine message and resolved status
         if args.done:
@@ -178,7 +211,8 @@ def cmd_reply(args):
                 "dry_run": True,
                 "would_post": {
                     "change_number": change_number,
-                    "thread_index": args.thread_index,
+                    "thread_index": args.thread_index if isinstance(args.thread_index, int) else None,
+                    "comment_id": last_comment.id,
                     "file": last_comment.file_path,
                     "line": last_comment.line,
                     "message": message,

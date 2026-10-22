@@ -32,12 +32,16 @@ URL, 5 connection failure, and 1 other failures.
 The 'comments' command extracts comment threads from a Gerrit change URL.
 By default, it only shows unresolved comments. Use --all to include resolved ones.
 
-Each comment thread is assigned an index (0, 1, 2, ...) that you can use with
-other commands like 'reply' or 'stage'. Those commands index the default
-listing. With --all, the threads the default listing shows come first, with
-the same indices, and the resolved ones follow; 'reply', 'done', 'ack' and
-'stage' refuse an index of one of those. Answer a resolved thread with
-'gc batch' and its comment_id.
+Each comment thread carries its index (0, 1, 2, ...) as "index", which you
+can use with other commands like 'reply' or 'stage'. Those commands index the
+default listing. With --all, the threads the default listing shows come first,
+with the same indices, and the resolved ones follow; 'reply', 'done', 'ack'
+and 'stage' refuse an index of one of those. Answer a resolved thread with
+'gc reply' or 'gc batch' and its root_comment.id.
+
+Indices shift: once a reply resolves thread 0, the next listing's thread 0
+is what was thread 1. For more than one reply, address threads by
+root_comment.id ('gc reply <id> ...'), which does not shift.
 
 review_messages holds the change-level messages. A review message that
 says nothing beyond its vote and "(N comments)" is left out by default;
@@ -72,8 +76,14 @@ reviewer and patchset, along with uploads, rebases and CI results.
         "summary": "Reply to a comment thread",
         "description": """
 The 'reply' command posts a reply to a specific comment thread. You identify
-the thread by its index from the 'comments' output. An index of a resolved
-thread, which only 'comments --all' lists, is refused.
+the thread by its index from the 'comments' output, or by the id of a comment
+in it (root_comment.id in 'comments'). An index of a resolved thread, which
+only 'comments --all' lists, is refused; a comment id reaches any thread.
+
+An index is looked up afresh in the unresolved listing each time, so after a
+reply that resolves a thread, the indices after it shift down by one: a second
+'gc reply 1' then answers what 'gc comments' had shown as 2. When you reply
+to more than one thread, use the comment ids, or 'gc batch'.
 
 URL is optional - if you recently ran 'gc comments URL', the URL is remembered
 and reused automatically. Use --url to override.
@@ -103,6 +113,10 @@ Common patterns:
             {
                 "command": "gc reply 0 --done --url URL",
                 "description": "Explicit URL (overrides remembered URL)",
+            },
+            {
+                "command": "gc reply fe4b1c39_3f8c9a2e \"Fixed\" --resolve",
+                "description": "Reply by the thread's root_comment.id; stable across replies",
             },
         ],
         "related": ["comments", "stage", "batch"],

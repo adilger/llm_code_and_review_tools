@@ -153,9 +153,9 @@ def get_tool_description() -> ToolDescription:
             Command(
                 name="reply",
                 description="Reply to a comment thread (URL optional if recently ran 'comments')",
-                usage='gc reply <THREAD_INDEX> "<MESSAGE>" [--url URL]',
+                usage='gc reply <THREAD_INDEX|COMMENT_ID> "<MESSAGE>" [--url URL]',
                 arguments=[
-                    Argument(name="thread_index", description="Thread index from 'comments' output", type="integer", required=True),
+                    Argument(name="thread", description="Thread index from 'comments' output, or a comment id in the thread (root_comment.id). Indices shift as threads are resolved; use comment ids for more than one reply", required=True),
                     Argument(name="message", description="Reply message (required unless --done or --ack)"),
                     Argument(name="--url", description="Gerrit change URL (uses last URL from 'gc comments' if omitted)"),
                     Argument(name="--done", description="Mark as done (adds 'Done' and resolves)", type="boolean", default=False),
@@ -167,6 +167,7 @@ def get_tool_description() -> ToolDescription:
                     'gc reply 0 "Fixed in next patchset"',
                     "gc reply --done 1",
                     "gc reply --ack 2",
+                    'gc reply fe4b1c39_3f8c9a2e "Fixed" --resolve',
                 ],
                 output_fields=["change_number", "thread_index", "message", "resolved"],
                 next_actions=["comments (to verify)", "reply (next thread)"],
