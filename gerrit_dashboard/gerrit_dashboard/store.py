@@ -6,6 +6,7 @@ the Flask request handlers and the background refresher can share them.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -29,7 +30,27 @@ SUMMARY_FILE = "summary.json"
 # Bump when the snapshot layout changes: a persisted snapshot from
 # another code version must be discarded, not rendered (missing keys
 # 500 the page until the next successful refresh).
-SNAPSHOT_SCHEMA = 22
+SNAPSHOT_LAYOUT = 22
+
+
+def _code_fingerprint(directory: Path | None = None) -> str:
+    """A digest of this package's Python source.
+
+    Part of the schema, so a snapshot written by any other version of the
+    code is discarded and the board refreshed (app.py refreshes a board
+    that has no usable snapshot as soon as it is opened). Bumping
+    SNAPSHOT_LAYOUT by hand was once forgotten: every board saved before
+    the change 500'd -- the page could not even offer its refresh button
+    -- until each was refreshed by hand.
+    """
+    digest = hashlib.sha256()
+    for path in sorted((directory or Path(__file__).resolve().parent).glob("*.py")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+SNAPSHOT_SCHEMA = f"{SNAPSHOT_LAYOUT}.{_code_fingerprint()}"
 
 # Usernames become URL tokens, Gerrit query terms and directory names, so
 # they are restricted to a conservative charset AND must contain at least

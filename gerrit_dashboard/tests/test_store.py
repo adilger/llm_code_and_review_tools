@@ -56,12 +56,30 @@ class TestWatchlist:
 class TestSchemaGuard:
     def test_old_schema_snapshot_rejected(self, tmp_path):
         import json
-        from gerrit_dashboard.store import SNAPSHOT_SCHEMA
         store = Store(tmp_path)
-        (tmp_path / "snapshot.json").write_text(json.dumps({"schema": SNAPSHOT_SCHEMA - 1, "kpis": {}}))
+        (tmp_path / "snapshot.json").write_text(json.dumps({"schema": 21, "kpis": {}}))
         assert store.load_snapshot() is None
         (tmp_path / "snapshot.json").write_text(json.dumps({"kpis": {}}))  # no schema at all
         assert store.load_snapshot() is None
+
+    def test_a_snapshot_from_other_code_is_rejected(self, tmp_path):
+        """Same layout number, other code: a change to the rows once kept
+        the number, and every board saved before it 500'd."""
+        import json
+        from gerrit_dashboard.store import SNAPSHOT_LAYOUT, SNAPSHOT_SCHEMA
+        store = Store(tmp_path)
+        assert SNAPSHOT_SCHEMA.startswith(f"{SNAPSHOT_LAYOUT}.")
+        for old in (SNAPSHOT_LAYOUT, f"{SNAPSHOT_LAYOUT}.000000000000"):
+            (tmp_path / "snapshot.json").write_text(json.dumps({"schema": old, "kpis": {}}))
+            assert store.load_snapshot() is None
+
+    def test_the_fingerprint_follows_the_code(self, tmp_path):
+        from gerrit_dashboard.store import _code_fingerprint
+        (tmp_path / "rows.py").write_text("total = 0\n")
+        before = _code_fingerprint(tmp_path)
+        assert _code_fingerprint(tmp_path) == before
+        (tmp_path / "rows.py").write_text("total = 1\n")
+        assert _code_fingerprint(tmp_path) != before
 
     def test_malformed_watchlist_entries_filtered(self, tmp_path):
         import json

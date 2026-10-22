@@ -72,7 +72,7 @@ class TestListBoards:
 
     def test_outdated_schema_is_marked_not_dropped(self, tmp_path):
         cfg = Config(); cfg.data_dir = tmp_path
-        seed(cfg, "ancient", name="Ancient User", schema=SNAPSHOT_SCHEMA - 1)
+        seed(cfg, "ancient", name="Ancient User", schema=21)
         board = list_boards(tmp_path)[0]
         assert board["summary"]["state"] == "outdated"
         assert board["summary"]["self"]["name"] == "Ancient User"

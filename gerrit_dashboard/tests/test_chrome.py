@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from conftest import mk_bundle, mk_change
+from conftest import ADILGER, mk_bundle, mk_change, vote
 
 from gerrit_dashboard import __version__
 from gerrit_dashboard import app as app_mod
@@ -252,3 +252,38 @@ class TestReviewCell:
                                    form_error="", static_mode=True, gerrit_url="https://x", user="alex")
         assert ">R +2/2</span>" in html
         assert ">R ✗</span>" in html and "not ready yet" in html
+
+
+class TestBoardFromOtherCode:
+    def test_it_renders_instead_of_failing(self, tmp_path):
+        """A board saved by an older version may lack what this one's
+        template reads (review.total, once): it is set aside, the page
+        renders, and the board refreshes when its refresher starts."""
+        import json
+
+        cfg = Config()
+        cfg.data_dir = tmp_path
+        store = user_store(tmp_path, "alex")
+        # A review vote: the template reads review.total for it.
+        change = mk_change(code_review=[vote(ADILGER, 1)])
+        snap = build_snapshot(mk_bundle([(change, {"mine"})]), cfg)
+        # What the code before saved: the same layout number, and rows
+        # whose review has no "total" yet.
+        snap["schema"] = 22
+
+        def strip(x):
+            if isinstance(x, dict):
+                if "threshold" in x:
+                    x.pop("total", None)
+                for v in x.values():
+                    strip(v)
+            elif isinstance(x, list):
+                for v in x:
+                    strip(v)
+
+        strip(snap)
+        assert '"total"' not in json.dumps(snap)
+        (store.data_dir / "snapshot.json").write_text(json.dumps(snap))
+        app = create_app(cfg, start_refresher=False)
+        app.config.update(TESTING=True)
+        assert app.test_client().get("/alex/").status_code == 200

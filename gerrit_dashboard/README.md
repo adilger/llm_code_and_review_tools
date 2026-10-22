@@ -178,6 +178,10 @@ palette), maps the theme onto the classic dark and light palettes, and
 scales the px-based page for text size. A `snapshot` export inlines all of it, fonts included,
 so the file stands alone.
 
-Bumping `SNAPSHOT_SCHEMA` in `store.py` is required whenever the snapshot
-layout changes; stale snapshots are then discarded instead of breaking the
-template.
+A saved snapshot is only rendered by the code that wrote it: its schema
+(`SNAPSHOT_SCHEMA` in `store.py`) is the layout number `SNAPSHOT_LAYOUT`
+plus a digest of the package's Python source. After an update the old
+snapshots are discarded and each board refreshes when it is first opened,
+instead of the template failing on a key the old rows lack -- which is what
+happened once when the layout number was not bumped by hand. Bump
+`SNAPSHOT_LAYOUT` still when the layout changes; the digest is the net.
