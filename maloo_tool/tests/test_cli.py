@@ -1160,6 +1160,64 @@ class TestRetest:
         assert env["data"]["bug_id"] == "LU-19487"
 
 
+# -- prioritize command --
+
+
+class TestPrioritize:
+    def _result(self, **kw):
+        result = {"job": "lustre-reviews", "buildno": 134303, "idx": None,
+                  "scope": "build", "sent": True}
+        result.update(kw)
+        return result
+
+    def test_whole_build(self, runner, mock_client):
+        mock_client.prioritize.return_value = self._result()
+        result = runner.invoke(main, ["--envelope", "prioritize", "134303"])
+        env = _parse_output(result)
+        assert env["ok"] is True
+        mock_client.prioritize.assert_called_once_with(
+            job="lustre-reviews", buildno=134303, idx=None, dry_run=False)
+
+    def test_session_and_branch(self, runner, mock_client):
+        mock_client.prioritize.return_value = self._result(idx=7)
+        result = runner.invoke(main, ["prioritize", "27341", "--idx", "7",
+                                      "--branch", "b_es6_0"])
+        assert result.exit_code == 0, result.output
+        mock_client.prioritize.assert_called_once_with(
+            job="lustre-b_es-reviews", buildno=27341, idx=7, dry_run=False)
+
+    def test_dry_run_suggests_the_send(self, runner, mock_client):
+        mock_client.prioritize.return_value = self._result(idx=41, sent=False)
+        result = runner.invoke(main, ["--envelope", "prioritize", "134303",
+                                      "--idx", "41", "--dry-run"])
+        env = _parse_output(result)
+        assert mock_client.prioritize.call_args[1]["dry_run"] is True
+        assert any(a.startswith("maloo prioritize 134303 --idx 41 ")
+                   for a in env["next_actions"])
+
+    def test_not_offered_is_an_error(self, runner, mock_client):
+        from maloo_tool.errors import ToolError
+        mock_client.prioritize.side_effect = ToolError(
+            "PRIORITIZE_NOT_OFFERED", "not offered", details={"sessions": 3})
+        result = runner.invoke(main, ["prioritize", "134303", "--idx", "25"])
+        assert result.exit_code == 1
+        out = json.loads(result.output)
+        assert out["code"] == "PRIORITIZE_NOT_OFFERED"
+
+    def test_not_found_exit_code(self, runner, mock_client):
+        from maloo_tool.errors import NotFoundError
+        mock_client.prioritize.side_effect = NotFoundError(
+            "QUEUE_ENTRY_NOT_FOUND", "no such session")
+        result = runner.invoke(main, ["prioritize", "134303", "--idx", "999"])
+        assert result.exit_code == 3
+
+    def test_runtime_error_is_prioritize_failed(self, runner, mock_client):
+        mock_client.prioritize.side_effect = RuntimeError("no CSRF token")
+        result = runner.invoke(main, ["prioritize", "134303"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["code"] == "PRIORITIZE_FAILED"
+
+
 # -- logs command --
 
 

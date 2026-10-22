@@ -846,6 +846,142 @@ class TestRetest:
 
 
 # ---------------------------------------------------------------------------
+# prioritize
+# ---------------------------------------------------------------------------
+
+QUEUE_PAGE = """<html><head>
+<meta name="csrf-param" content="authenticity_token" />
+<meta name="csrf-token" content="queue-tok" />
+</head><body><table>
+<tr><th>Job</th><th>Idx</th></tr>
+<tr class="Testing can_hide"> <td class="clickable job">lustre-reviews</td>
+ <td class="clickable action abandon" data="lustre-reviews#134303#25">25</td></tr>
+<tr class="Queued can_hide"> <td class="clickable job">lustre-reviews</td>
+ <td class="clickable action abandon" data="lustre-reviews#134303#24">24</td></tr>
+<tr class="Waiting can_hide"> <td class="clickable job">lustre-reviews</td>
+ <td class="clickable action priority abandon" data="lustre-reviews#134303#41">41</td></tr>
+<tr class="Waiting can_hide"> <td class="clickable job">lustre-reviews</td>
+ <td class="clickable action priority abandon" data="lustre-reviews#134303#42">42</td></tr>
+</table></body></html>"""
+
+
+class TestParseQueueRows:
+    def test_rows_and_actions(self):
+        rows = MalooClient.parse_queue_rows(QUEUE_PAGE)
+        assert [r["idx"] for r in rows] == [25, 24, 41, 42]
+        assert rows[0] == {
+            "key": "lustre-reviews#134303#25", "job": "lustre-reviews",
+            "buildno": 134303, "idx": 25, "status": "Testing",
+            "actions": ["abandon"],
+        }
+        assert rows[2]["actions"] == ["abandon", "priority"]
+        assert rows[2]["status"] == "Waiting"
+
+    def test_row_without_idx(self):
+        page = ('<tr class="Waiting"><td class="clickable action priority" '
+                'data="lustre-reviews#134303#">x</td></tr>')
+        rows = MalooClient.parse_queue_rows(page)
+        assert rows[0]["idx"] is None
+        assert rows[0]["actions"] == ["priority"]
+
+
+class TestPrioritize:
+    @pytest.fixture
+    def web(self, client):
+        web = MagicMock()
+        client._web_login = MagicMock(return_value=web)
+        web.get.return_value = _mock_response(text=QUEUE_PAGE)
+        web.post.return_value = _mock_response(text=" ok ")
+        return web
+
+    def test_reads_the_build_queue_page(self, client, web):
+        client.prioritize("lustre-reviews", 134303, idx=41, dry_run=True)
+        args, kwargs = web.get.call_args
+        assert args[0] == "https://testing.example.com/test_queue"
+        assert kwargs["params"] == {"jobs": "lustre-reviews",
+                                    "builds": 134303,
+                                    "commit": "Apply Filter"}
+
+    def test_session(self, client, web):
+        result = client.prioritize("lustre-reviews", 134303, idx=41)
+        args, kwargs = web.post.call_args
+        assert args[0] == "https://testing.example.com/test_queue/actionable"
+        assert kwargs["data"] == {
+            "kind": "idx", "session": "lustre-reviews#134303#41",
+            "call": "prioritize", "authenticity_token": "queue-tok",
+        }
+        assert kwargs["headers"]["X-CSRF-Token"] == "queue-tok"
+        assert result["sent"] is True
+        assert result["scope"] == "session"
+        assert result["response"] == "ok"
+        assert result["statuses"] == {"Testing": 1, "Queued": 1, "Waiting": 2}
+
+    def test_whole_build_uses_a_prioritizable_row(self, client, web):
+        result = client.prioritize("lustre-reviews", 134303)
+        data = web.post.call_args[1]["data"]
+        assert data["kind"] == "all"
+        assert data["session"] == "lustre-reviews#134303#41"
+        assert result["scope"] == "build"
+        assert result["prioritizable"] == 2
+
+    def test_dry_run_sends_nothing(self, client, web):
+        result = client.prioritize("lustre-reviews", 134303, idx=42,
+                                   dry_run=True)
+        web.post.assert_not_called()
+        assert result["sent"] is False
+        assert result["request"] == {
+            "path": "/test_queue/actionable",
+            "data": {"kind": "idx", "session": "lustre-reviews#134303#42",
+                     "call": "prioritize"},
+        }
+
+    def test_not_offered_sends_nothing(self, client, web):
+        from maloo_tool.errors import ToolError
+        with pytest.raises(ToolError) as exc:
+            client.prioritize("lustre-reviews", 134303, idx=25)
+        assert exc.value.code == "PRIORITIZE_NOT_OFFERED"
+        assert "Testing" in exc.value.message
+        web.post.assert_not_called()
+
+    def test_unknown_idx(self, client, web):
+        from maloo_tool.errors import NotFoundError
+        with pytest.raises(NotFoundError) as exc:
+            client.prioritize("lustre-reviews", 134303, idx=999)
+        assert exc.value.code == "QUEUE_ENTRY_NOT_FOUND"
+        web.post.assert_not_called()
+
+    def test_other_build_rows_ignored(self, client, web):
+        from maloo_tool.errors import NotFoundError
+        with pytest.raises(NotFoundError):
+            client.prioritize("lustre-reviews", 99999)
+        web.post.assert_not_called()
+
+    def test_build_with_nothing_offered(self, client, web):
+        from maloo_tool.errors import ToolError
+        web.get.return_value = _mock_response(
+            text=QUEUE_PAGE.replace("action priority abandon",
+                                    "action abandon"))
+        with pytest.raises(ToolError) as exc:
+            client.prioritize("lustre-reviews", 134303)
+        assert exc.value.code == "PRIORITIZE_NOT_OFFERED"
+        web.post.assert_not_called()
+
+    def test_missing_csrf_token(self, client, web):
+        web.get.return_value = _mock_response(
+            text=QUEUE_PAGE.replace('name="csrf-token"', 'name="other"'))
+        with pytest.raises(RuntimeError, match="CSRF"):
+            client.prioritize("lustre-reviews", 134303, idx=41)
+        web.post.assert_not_called()
+
+    def test_http_error_raises(self, client, web):
+        web.post.return_value = _mock_response(
+            status_code=422,
+            raise_for_status=requests.exceptions.HTTPError("422"))
+        with pytest.raises(requests.exceptions.HTTPError):
+            client.prioritize("lustre-reviews", 134303, idx=41)
+
+
+# ---------------------------------------------------------------------------
 # raise_bug
 # ---------------------------------------------------------------------------
 
