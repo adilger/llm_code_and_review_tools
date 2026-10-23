@@ -438,6 +438,7 @@ includes:
 ### Comments & Review
 ```bash
 comments <URL>                   # Get unresolved comments
+comments <URL> --messages        # Change messages only, oldest first (e.g. an earlier "BUILD")
 comments <URL> --all --include-system  # Every review message too: votes, uploads, CI
 reply <thread_index> "msg"       # Reply to a comment
 reply <comment_id> "msg"         # Same, by root_comment.id (stable; use for several)

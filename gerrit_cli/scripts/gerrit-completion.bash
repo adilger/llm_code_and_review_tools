@@ -48,7 +48,7 @@ _gerrit_completions() {
         batch) opts="--dry-run --envelope --help --pretty --user -U -h -n -p" ;;
         check) opts="--envelope --help --offline --user -U -h" ;;
         checkout|co) opts="--branch --envelope --help --patchset --pretty --user -U -b -h -p -r" ;;
-        comments|extract) opts="--all --context-lines --envelope --fields --help --include-ci --include-system --no-context --pretty --since --summary --timeline --user -U -a -c -h -p -s" ;;
+        comments|extract) opts="--all --context-lines --envelope --fields --help --include-ci --include-system --messages --no-context --pretty --since --summary --timeline --user -U -a -c -h -p -s" ;;
         continue-reintegration) opts="--envelope --help --user -U -h" ;;
         describe) opts="--command --envelope --help --pretty --user -U -h -p" ;;
         diff) opts="--envelope --help --pretty --unified --user -U -h -p -u" ;;

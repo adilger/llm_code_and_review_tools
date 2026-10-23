@@ -101,20 +101,32 @@ def add_extract_parser(subparsers):
         help="Include CI/build bot messages only (Maloo, Jenkins, Autotest). "
              "Also enabled by --include-system.",
     )
-    parser.add_argument(
+    view = parser.add_mutually_exclusive_group()
+    view.add_argument(
         "--timeline",
         action="store_true",
         help="Every comment, root or reply, oldest first, one entry each: when, "
              "patchset, author, file/line, thread index, whether the thread is "
-             "resolved, and the message. Who said what when, and was it answered.",
+             "resolved, and the message. Who said what when, and was it answered. "
+             "Inline and patchset-level comments only; --messages lists the "
+             "change messages.",
+    )
+    view.add_argument(
+        "--messages",
+        action="store_true",
+        help="Only the change messages (top-level messages such as a bare "
+             "'BUILD' or a review's summary), oldest first: date, patchset, "
+             "author, text. CI bot messages need --include-ci; uploads, "
+             "rebases and vote-only messages need --include-system.",
     )
     parser.add_argument(
         "--since",
         metavar="TIME",
         default=None,
-        help="Only comments (with --timeline) or threads (otherwise, with --fields) "
-             "with something said at or after TIME, UTC as Gerrit gives it, e.g. "
-             "2026-10-01 or '2026-10-01 17:30'",
+        help="Only comments (with --timeline), change messages (with --messages) "
+             "or threads (otherwise, with --fields) with something said at or "
+             "after TIME, UTC as Gerrit gives it, e.g. 2026-10-01 or "
+             "'2026-10-01 17:30'",
     )
     return parser
 

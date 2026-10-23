@@ -452,6 +452,56 @@ class TestCmdExtract:
 
         assert exc_info.value.code == 1
 
+    def test_messages_lists_change_messages_oldest_first(self, capsys):
+        """--messages lists the top-level change messages, a bare BUILD among
+        them, which --timeline (inline comments only) never showed."""
+        import json
+
+        from gerrit_cli.cli import build_parser, cmd_extract
+        from gerrit_cli.extractor import CommentExtractor
+
+        client = MagicMock()
+        client.get_change_detail.return_value = {
+            "current_revision": "abc",
+            "revisions": {"abc": {"_number": 3}},
+        }
+        client.get_comments.return_value = {}
+        client.get_messages.return_value = [
+            {"id": "m3", "author": {"name": "Jenkins"},
+             "date": "2026-10-02 10:05:00.000000000",
+             "message": "Patch Set 3:\n\nBuild started", "_revision_number": 3},
+            {"id": "m2", "author": {"name": "Andreas Dilger"},
+             "date": "2026-10-02 10:00:00.000000000",
+             "message": "Patch Set 3:\n\nBUILD", "_revision_number": 3},
+            {"id": "m1", "author": {"name": "Andreas Dilger"},
+             "date": "2026-10-01 09:00:00.000000000",
+             "message": "Patch Set 2:\n\nLooks fine", "_revision_number": 2},
+        ]
+        client.format_change_url.return_value = "https://example.com/12345"
+
+        def extract(**kwargs):
+            kwargs.pop("url")
+            return CommentExtractor(client).extract_from_change(12345, **kwargs)
+
+        args = build_parser().parse_args(
+            ["comments", "12345", "--messages", "--since", "2026-10-02"])
+        with patch('gerrit_cli.cli.extract_comments', side_effect=extract), \
+             patch('gerrit_cli.commands.comments.LastURLManager'), \
+             pytest.raises(SystemExit) as exc_info:
+            cmd_extract(args)
+        assert exc_info.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["messages"] == [{
+            "date": "2026-10-02 10:00:00.000000000",
+            "patch_set": 3,
+            "author": "Andreas Dilger",
+            "message": "Patch Set 3:\n\nBUILD",
+        }]
+        assert "1 CI/bot message" in data["hint"]
+
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["comments", "1", "--messages", "--timeline"])
+
 
 class TestCmdWorkOnPatch:
     """Tests for cmd_work_on_patch function."""

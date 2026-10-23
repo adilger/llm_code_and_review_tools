@@ -168,6 +168,22 @@ def comment_timeline(threads: list, since: str = "") -> list[dict]:
     return sorted(entries, key=lambda entry: entry["updated"])
 
 
+def message_list(review_messages: list, since: str = "") -> list[dict]:
+    """The change-level messages, oldest first: when, patchset, author and
+    text of each, as 'comments --messages' lists them."""
+    entries = [
+        {
+            "date": message.date,
+            "patch_set": message.patch_set,
+            "author": message.author.name,
+            "message": message.message,
+        }
+        for message in review_messages
+        if not since or message.date >= since
+    ]
+    return sorted(entries, key=lambda entry: entry["date"])
+
+
 def thread_index_error(result: Any, index: int) -> str | None:
     """Why index names no thread reply/done/ack/stage can answer.
 

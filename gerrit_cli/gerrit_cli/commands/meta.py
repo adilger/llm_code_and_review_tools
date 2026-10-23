@@ -47,6 +47,8 @@ review_messages holds the change-level messages. A review message that
 says nothing beyond its vote and "(N comments)" is left out by default;
 --include-system keeps every message, so each vote shows with its
 reviewer and patchset, along with uploads, rebases and CI results.
+--messages lists only the change messages, oldest first, with date,
+patchset, author and text: has anyone asked for a BUILD yet?
 """,
         "examples": [
             {
@@ -64,6 +66,10 @@ reviewer and patchset, along with uploads, rebases and CI results.
             {
                 "command": "gc comments --no-context https://review.example.com/c/project/+/12345",
                 "description": "Skip code context around comments",
+            },
+            {
+                "command": "gc comments --messages 12345",
+                "description": "The change messages, oldest first (CI too with --include-ci)",
             },
             {
                 "command": "gc comments --all --include-system 12345",

@@ -12,6 +12,7 @@ from ._helpers import (
     error_code_for,
     exit_code_for,
     filter_threads_by_fields,
+    message_list,
     output_error,
     output_result,
     output_success,
@@ -58,7 +59,15 @@ def cmd_extract(args):
         )
 
         since = normalize_since(getattr(args, 'since', None))
-        if getattr(args, 'timeline', False):
+        if getattr(args, 'messages', False):
+            entries = message_list(result.review_messages, since)
+            data = {"messages": entries, "count": len(entries)}
+            if result.hidden_ci_count:
+                data["hint"] = (
+                    f"{result.hidden_ci_count} CI/bot message(s) are not listed; "
+                    "add --include-ci (or --include-system) for them."
+                )
+        elif getattr(args, 'timeline', False):
             entries = comment_timeline(result.threads, since)
             data = {"timeline": entries, "count": len(entries)}
             if result.hidden_resolved_count:
