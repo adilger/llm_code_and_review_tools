@@ -178,6 +178,7 @@ def cmd_series_comments(args):
             show_progress=False,  # No progress in JSON mode
             include_system=include_system,
             exclude_ci_bots=not include_ci,
+            exclude_lint_bots=not getattr(args, 'include_lint', False),
         )
 
         if fields:

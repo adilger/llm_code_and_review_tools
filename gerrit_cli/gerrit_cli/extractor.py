@@ -21,17 +21,18 @@ CI_BOT_AUTHORS: set[str] = {
     "Maloo",
     "jenkins",
     "Jenkins",
+    "Lustre RISC-V Builder",
+    "Lustre Gerrit Janitor",  # Posts build and test results
     # Common CI system names
     "Autotest",
     "CI Bot",
     "Build Bot",
 }
 
-# Lint/style/static analysis checkers - kept by default but can be filtered separately.
+# Lint/style/static analysis checkers - filtered out by default.
 LINT_BOT_AUTHORS: set[str] = {
     "wc-checkpatch",
     "Misc Code Checks Robot (Gatekeeper helper)",
-    "Lustre Gerrit Janitor",  # Posts review comments about code problems
     "Janitor Bot",  # Static analysis and auto-fixes
 }
 
@@ -55,7 +56,7 @@ class CommentExtractor:
         include_code_context: bool = True,
         context_lines: int = 3,
         exclude_ci_bots: bool = True,
-        exclude_lint_bots: bool = False,
+        exclude_lint_bots: bool = True,
         include_system: bool = False,
     ) -> ExtractedComments:
         """Extract comments from a Gerrit URL.
@@ -68,7 +69,7 @@ class CommentExtractor:
             exclude_ci_bots: Whether to exclude messages from CI/build systems
                 (Maloo, Jenkins, etc.). Default True.
             exclude_lint_bots: Whether to exclude messages from lint/style checkers
-                (checkpatch, etc.). Default False.
+                (checkpatch, etc.). Default True.
             include_system: Whether to include system messages like
                 "Uploaded patch set N", rebases, topic changes. Default False.
 
@@ -99,7 +100,7 @@ class CommentExtractor:
         include_code_context: bool = True,
         context_lines: int = 3,
         exclude_ci_bots: bool = True,
-        exclude_lint_bots: bool = False,
+        exclude_lint_bots: bool = True,
         include_system: bool = False,
     ) -> ExtractedComments:
         """Extract comments from a Gerrit change number.
@@ -112,7 +113,7 @@ class CommentExtractor:
             exclude_ci_bots: Whether to exclude messages from CI/build systems
                 (Maloo, Jenkins, etc.). Default True.
             exclude_lint_bots: Whether to exclude messages from lint/style checkers
-                (checkpatch, etc.). Default False.
+                (checkpatch, etc.). Default True.
             include_system: Whether to include system messages like
                 "Uploaded patch set N", rebases, topic changes. Default False.
 
@@ -230,7 +231,7 @@ class CommentExtractor:
         raw_messages: list[dict[str, Any]],
         current_patchset: int,
         exclude_ci_bots: bool = True,
-        exclude_lint_bots: bool = False,
+        exclude_lint_bots: bool = True,
         include_system: bool = False,
     ) -> list[ReviewMessage]:
         """Parse raw API messages into ReviewMessage objects.
@@ -425,7 +426,7 @@ def extract_comments(
     include_code_context: bool = True,
     context_lines: int = 3,
     exclude_ci_bots: bool = True,
-    exclude_lint_bots: bool = False,
+    exclude_lint_bots: bool = True,
     include_system: bool = False,
 ) -> ExtractedComments:
     """Convenience function to extract comments from a Gerrit URL.
@@ -438,7 +439,7 @@ def extract_comments(
         exclude_ci_bots: Whether to exclude messages from CI/build systems
             (Maloo, Jenkins, etc.). Default True.
         exclude_lint_bots: Whether to exclude messages from lint/style checkers
-            (checkpatch, Janitor Bot, etc.). Default False.
+            (checkpatch, Janitor Bot, etc.). Default True.
         include_system: Whether to include system messages like
             "Uploaded patch set N", rebases, topic changes. Default False.
 

@@ -98,8 +98,14 @@ def add_extract_parser(subparsers):
     parser.add_argument(
         "--include-ci",
         action="store_true",
-        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest). "
-             "Also enabled by --include-system.",
+        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest, "
+             "Janitor). Also enabled by --include-system.",
+    )
+    parser.add_argument(
+        "--include-lint",
+        action="store_true",
+        help="Include lint/style checker messages (wc-checkpatch, "
+             "Misc Code Checks Robot).",
     )
     view = parser.add_mutually_exclusive_group()
     view.add_argument(
@@ -365,8 +371,14 @@ def add_series_comments_parser(subparsers):
     parser.add_argument(
         "--include-ci",
         action="store_true",
-        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest). "
-             "Also enabled by --include-system.",
+        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest, "
+             "Janitor). Also enabled by --include-system.",
+    )
+    parser.add_argument(
+        "--include-lint",
+        action="store_true",
+        help="Include lint/style checker messages (wc-checkpatch, "
+             "Misc Code Checks Robot).",
     )
     return parser
 

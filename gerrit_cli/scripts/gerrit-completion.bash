@@ -48,7 +48,7 @@ _gerrit_completions() {
         batch) opts="--dry-run --envelope --help --pretty --user -U -h -n -p" ;;
         check) opts="--envelope --help --offline --user -U -h" ;;
         checkout|co) opts="--branch --envelope --help --patchset --pretty --user -U -b -h -p -r" ;;
-        comments|extract) opts="--all --context-lines --envelope --fields --help --include-ci --include-system --messages --no-context --pretty --since --summary --timeline --user -U -a -c -h -p -s" ;;
+        comments|extract) opts="--all --context-lines --envelope --fields --help --include-ci --include-lint --include-system --messages --no-context --pretty --since --summary --timeline --user -U -a -c -h -p -s" ;;
         continue-reintegration) opts="--envelope --help --user -U -h" ;;
         describe) opts="--command --envelope --help --pretty --user -U -h -p" ;;
         diff) opts="--envelope --help --pretty --unified --user -U -h -p -u" ;;
@@ -76,7 +76,7 @@ _gerrit_completions() {
         reviewers) opts="--envelope --help --pretty --user -U -h -p" ;;
         s|search) opts="--all --envelope --help --limit --max --pretty --start --user -S -U -a -h -n -p" ;;
         sashiko-review|sr) opts="--dry-run --envelope --help --repo --sashiko-url --timeout --user --vote -U -h" ;;
-        series-comments) opts="--all --context-lines --envelope --fields --help --include-ci --include-system --no-context --pretty --summary --user -U -a -c -h -p -s" ;;
+        series-comments) opts="--all --context-lines --envelope --fields --help --include-ci --include-lint --include-system --no-context --pretty --summary --user -U -a -c -h -p -s" ;;
         series-info) opts="--envelope --help --pretty --show-bots --user -U -h -p" ;;
         series-status) opts="--envelope --help --pretty --user -U -h -p" ;;
         set-topic) opts="--envelope --help --pretty --user -U -h -p" ;;
