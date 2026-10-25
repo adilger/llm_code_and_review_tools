@@ -190,6 +190,27 @@ class TestBuildAgentCmd:
         cmd = build_agent_cmd(config)
         assert cmd[-4:] == ["--model", "opus", "--max-turns", "50"]
 
+    def test_allowlist_expands_the_placeholders(self, tmp_path):
+        config = _config(tmp_path, tmp_path, prompts_dir=Path("/p/kernel"),
+                         allowed_tools=["Read(/{prompts}/**)",
+                                        "Edit(/{worktree}/**)"])
+        cmd = build_agent_cmd(config, worktree=Path("/w/64086"))
+        assert "--dangerously-skip-permissions" not in cmd
+        i = cmd.index("--allowedTools")
+        assert cmd[i + 1] == "Read(//p/kernel/**),Edit(//w/64086/**)"
+        assert cmd[i - 1] == "dontAsk"
+
+    def test_allowlist_rule_checks(self, tmp_path):
+        with pytest.raises(ValueError, match="comma"):
+            _config(tmp_path, tmp_path, allowed_tools=["Bash(a,b)"])
+        with pytest.raises(ValueError, match="claude"):
+            _config(tmp_path, tmp_path, agent="codex",
+                    allowed_tools=["Read"])
+        config = _config(tmp_path, tmp_path,
+                         allowed_tools=["Edit(/{worktree}/**)"])
+        with pytest.raises(ValueError, match="no worktree"):
+            build_agent_cmd(config)
+
     def test_jobs_must_be_positive(self, tmp_path):
         with pytest.raises(ValueError):
             _config(tmp_path, tmp_path, jobs=0)

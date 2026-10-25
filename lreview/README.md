@@ -730,6 +730,7 @@ opencode's `--model` wants the `provider/model` form.
 | `--lean` / `--no-lean` | on (`$LREVIEW_LEAN=0` for off) | claude: minimal tools, no MCP/skills/CLAUDE.md, 5-minute prompt cache; codex: unused features off (see "Cost, speed and telemetry") |
 | `--preload` / `--no-preload` | on (`$LREVIEW_PRELOAD=0` for off) | full mode: the protocol and its always-loaded files up front (claude: system prompt; codex: start of the prompt), the commit in the first message |
 | `--agent-arg=ARG` | — | Extra agent-CLI arg (repeatable; `--claude-arg` is a legacy alias) |
+| `--allow-tool=RULE` | — | Claude only. A permission rule, for example `Bash(git log *)` (repeatable). With one or more rules, the review runs with `--permission-mode dontAsk` and only these tools, in place of `--dangerously-skip-permissions`. `{worktree}` and `{prompts}` expand to absolute paths, so `Edit(/{worktree}/**)` lets the agent write only in its worktree. Add a deny rule with `--agent-arg=--disallowedTools --agent-arg=RULE` |
 | `--post` | off | Post findings when batch finishes |
 | `--prefix TEXT` | `[AI review - <model>]` | Message prefix; `<model>` placeholder substituted (`$LREVIEW_PREFIX` overrides the default; `''` for none) |
 | `--prompts-dir DIR` | auto | review-prompts location (repo root or its `kernel/`); default: `$REVIEW_PROMPTS_DIR`, the bundled submodule, a legacy kreview.md install, or `~/review-prompts` |
