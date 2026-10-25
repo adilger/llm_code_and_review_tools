@@ -473,6 +473,26 @@ class GerritCommentsClient:
             json=review_input,
         )
 
+    def get_drafts(self, change_number: int) -> dict[str, list[dict[str, Any]]]:
+        """Get the draft comments of the logged-in account on a change.
+
+        Returns:
+            Dict mapping file paths to lists of draft comments
+        """
+        return self.rest.get(f"/changes/{change_number}/drafts")
+
+    def publish_drafts(self, change_number: int) -> dict[str, Any]:
+        """Publish every draft comment of the logged-in account on the
+        change, on all patch sets.
+
+        In drafts mode the gate rewrites a review POST into drafts, so
+        this call publishes nothing. cmd_publish_drafts refuses first.
+        """
+        return self.rest.post(
+            f"/changes/{change_number}/revisions/current/review",
+            json={"drafts": "PUBLISH_ALL_REVISIONS"},
+        )
+
     def reply_to_comment(
         self,
         change_number: int,

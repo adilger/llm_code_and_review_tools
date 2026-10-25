@@ -10,7 +10,7 @@ _gerrit_completions() {
     _init_completion || return
 
     local global_opts="--envelope --help --user --version -U -h"
-    local commands="abandon abort ack add-reviewer batch check checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch push rebase related remove-reviewer reply restore review review-series reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
+    local commands="abandon abort ack add-reviewer batch check checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch publish-drafts push rebase related remove-reviewer reply restore review review-series reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
 
     # The command is the first word that is not a global option.
     local cmd="" i=1
@@ -65,6 +65,7 @@ _gerrit_completions() {
         maloo) opts="--envelope --help --patchset --pretty --user -U -h -p -r" ;;
         message) opts="--envelope --help --pretty --user -U -h -p" ;;
         next-patch) opts="--envelope --help --user --with-comments -U -h" ;;
+        publish-drafts) opts="--dry-run --envelope --expect-patchset --help --pretty --user -U -h -n -p" ;;
         push) opts="--dry-run --envelope --help --user -U -h -n" ;;
         rebase) opts="--envelope --help --pretty --user -U -h -p" ;;
         related) opts="--envelope --help --pretty --user -U -h -p" ;;
