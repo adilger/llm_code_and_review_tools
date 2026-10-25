@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gerrit_cli.client import GerritCommentsClient
+from gerrit_cli.client import GerritCommentsClient, _load_env_file
+from gerrit_cli.mode import DraftModeError, get_mode
 
 
 class TestGerritCommentsClient:
@@ -324,6 +325,7 @@ class TestGerritCommentsClientWithMocks:
 
         assert result is None
 
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "full"})
     @patch("gerrit_cli.client.GerritRestAPI")
     @patch("gerrit_cli.client.HTTPBasicAuth")
     def test_post_review(self, mock_auth, mock_api):
@@ -346,6 +348,7 @@ class TestGerritCommentsClientWithMocks:
         assert call_args[1]["json"]["message"] == "LGTM"
         assert call_args[1]["json"]["labels"]["Code-Review"] == 1
 
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "full"})
     @patch("gerrit_cli.client.GerritRestAPI")
     @patch("gerrit_cli.client.HTTPBasicAuth")
     def test_reply_to_comment(self, mock_auth, mock_api):
@@ -373,6 +376,7 @@ class TestGerritCommentsClientWithMocks:
         assert comments["test.py"][0]["message"] == "Acknowledged"
         assert comments["test.py"][0]["unresolved"] is False
 
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "full"})
     @patch("gerrit_cli.client.GerritRestAPI")
     @patch("gerrit_cli.client.HTTPBasicAuth")
     def test_mark_comment_done(self, mock_auth, mock_api):
@@ -423,3 +427,80 @@ class TestSshFallbackIdentity:
         monkeypatch.setenv("GERRIT_SSH_USER", "dev-ssh")
         client = GerritCommentsClient(url="https://review.example.com")
         assert self._ssh_logins(client) == ["dev-ssh@review.example.com"]
+
+
+class TestClientDraftMode:
+    """The client applies the GERRIT_CLI_MODE gate to every write."""
+
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "drafts"})
+    @patch("gerrit_cli.client.GerritRestAPI")
+    @patch("gerrit_cli.client.HTTPBasicAuth")
+    def test_review_becomes_drafts(self, mock_auth, mock_api):
+        """A review post is rewritten into draft comments."""
+        mock_rest = MagicMock()
+        mock_api.return_value = mock_rest
+
+        client = GerritCommentsClient()
+        client.reply_to_comment(
+            change_number=123,
+            revision_id="abc123",
+            file_path="test.py",
+            comment_id="comment456",
+            message="Acknowledged",
+            line=42,
+        )
+
+        mock_rest.post.assert_not_called()
+        mock_rest.put.assert_called_once()
+        assert mock_rest.put.call_args[0][0] == (
+            "/changes/123/revisions/abc123/drafts"
+        )
+
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "drafts"})
+    @patch("gerrit_cli.client.GerritRestAPI")
+    @patch("gerrit_cli.client.HTTPBasicAuth")
+    def test_vote_is_refused(self, mock_auth, mock_api):
+        """Gerrit has no draft vote, so a labelled review fails."""
+        mock_rest = MagicMock()
+        mock_api.return_value = mock_rest
+
+        client = GerritCommentsClient()
+        with pytest.raises(DraftModeError):
+            client.post_review(
+                change_number=123,
+                revision_id="abc123",
+                message="LGTM",
+                labels={"Code-Review": 1},
+            )
+
+        mock_rest.post.assert_not_called()
+        mock_rest.put.assert_not_called()
+
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "drafts"})
+    @patch("gerrit_cli.client.GerritRestAPI")
+    @patch("gerrit_cli.client.HTTPBasicAuth")
+    def test_non_review_writes_pass_through(self, mock_auth, mock_api):
+        """Drafts mode gates comments only, not reviewer changes."""
+        mock_rest = MagicMock()
+        mock_api.return_value = mock_rest
+
+        client = GerritCommentsClient()
+        client.add_reviewer(123, "someone")
+
+        mock_rest.post.assert_called_once()
+        assert mock_rest.post.call_args[0][0] == "/changes/123/reviewers"
+
+    @patch("gerrit_cli.client.GerritRestAPI")
+    @patch("gerrit_cli.client.HTTPBasicAuth")
+    def test_dotenv_cannot_set_the_mode(self, mock_auth, mock_api, tmp_path,
+                                        monkeypatch):
+        """A .env file must not be able to unlock full mode."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("GERRIT_CLI_MODE=full\n")
+        monkeypatch.setenv("GERRIT_CLI_ENV_FILE", str(env_file))
+        monkeypatch.setenv("GERRIT_CLI_MODE", "drafts")
+
+        _load_env_file()
+
+        assert os.environ["GERRIT_CLI_MODE"] == "drafts"
+        assert get_mode() == "drafts"

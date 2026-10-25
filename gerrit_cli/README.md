@@ -28,6 +28,37 @@ Exit codes: 0 success, 2 missing/rejected authentication, 4 invalid server URL,
 5 connection failure, 1 other failures. Failures use the normal JSON error
 object, with the diagnostic result in `details` (`error.details` with `--envelope`).
 
+## Operating Mode (`GERRIT_CLI_MODE`)
+
+`GERRIT_CLI_MODE` selects how the tool writes comments to Gerrit:
+
+```bash
+export GERRIT_CLI_MODE=full     # publish immediately (default)
+export GERRIT_CLI_MODE=drafts   # write draft comments
+```
+
+An unset or empty variable means `full`. Any other value means
+`drafts`, so a misspelled request for drafts does not publish. The
+variable comes from the process environment only — a `.env` file
+cannot set it. Set `drafts` for an agent session, so you can read each
+comment before you publish it.
+
+In `drafts` mode:
+
+- Inline comments and replies (`gc reply`, `gc done`, `gc ack`,
+  `gc push`, `gc review --post-comments`) become draft comments. They
+  are visible only to you, in the Gerrit web UI, until you publish them.
+- A cover message (`gc message`, or the `message` field of a review)
+  becomes a patchset-level draft comment, because Gerrit publishes
+  review messages at once and has no draft form for them.
+- Votes are refused: Gerrit has no draft vote. `gc vote`, and
+  `gc review` with a `vote`, fail with a message that names the mode.
+- The review tag is dropped: Gerrit rejects it on draft comments.
+- Everything else — reviewers, topic, hashtags, abandon, restore,
+  rebase — works as in `full` mode.
+- Each gated command writes a notice to stderr, and reports
+  `"gerrit_cli_mode": "drafts", "published": false` in its JSON.
+
 ## Output Format
 
 All commands print the JSON data payload by default (on errors, the

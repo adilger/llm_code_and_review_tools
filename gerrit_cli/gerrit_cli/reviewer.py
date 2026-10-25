@@ -39,6 +39,7 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 from .client import GerritCommentsClient
+from .mode import result_fields
 from .models import Author, ChangeInfo
 
 
@@ -296,6 +297,7 @@ class ReviewResult:
             "message": self.message,
             "vote": self.vote,
             "error": self.error,
+            **result_fields(),
         }
 
 

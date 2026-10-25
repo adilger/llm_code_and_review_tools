@@ -84,7 +84,7 @@ JIRA_CLOUD_PROJECTS="PROJ1,PROJ2"   # comma-separated project prefixes
 
 Run `jira --help` for full command list.
 
-### Gerrit tool (`gerrit`, aliased as `gc`, v0.2.4)
+### Gerrit tool (`gerrit`, aliased as `gc`, v0.2.5)
 
 Code review, comment management, patch workflows, and CI triage.
 Reads work with only `GERRIT_URL`; anything that changes a patch needs
@@ -95,6 +95,16 @@ a Change-Id (bare, or Gerrit's `project~branch~Change-Id` triplet) --
 the Change-Id being what a checkout has to hand, from the commit
 message. A Change-Id shared across branches resolves to the open change;
 if several are open the error lists them.
+
+**Operating mode (`GERRIT_CLI_MODE`):** `full` (the default, also for
+an unset or empty variable) publishes immediately; `drafts` (and any
+other value) writes every comment as a Gerrit draft, visible only to
+the account owner until they publish it in the web UI. In `drafts` mode a cover
+message becomes a patchset-level draft, votes are refused (Gerrit has
+no draft vote), and non-comment operations (reviewers, topic, hashtag,
+abandon, restore, rebase) are unaffected. Gated commands report
+`"gerrit_cli_mode"` and `"published"` in their JSON. The account
+owner sets this variable; agents must not set, unset, or override it.
 
 **Key commands:**
 - **Review:** `gc comments <url>`,

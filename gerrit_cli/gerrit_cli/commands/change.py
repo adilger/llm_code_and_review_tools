@@ -3,6 +3,7 @@
 import sys
 
 from ..errors import ErrorCode, ExitCode
+from ..mode import DraftModeError, result_fields
 from ._helpers import _cli, error_code_for, output_error, output_success
 
 
@@ -159,6 +160,8 @@ def cmd_vote(args):
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)
 
+    except DraftModeError as e:
+        sys.exit(output_error(ErrorCode.CONFIG_ERROR, str(e), command, pretty))
     except ValueError as e:
         sys.exit(output_error(ErrorCode.INVALID_INPUT, str(e), command, pretty))
     except Exception as e:
@@ -300,6 +303,7 @@ def cmd_message(args):
             "success": True,
             "change_number": change_number,
             "message": args.text,
+            **result_fields(),
         }
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)
