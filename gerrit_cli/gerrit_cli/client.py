@@ -13,6 +13,8 @@ from pygerrit2 import (  # type: ignore[import-untyped]
     HTTPBasicAuth,
 )
 
+from .mode import MODE_ENV_VAR, wrap_rest
+
 
 # Credential loading is shared with jira-tool, maloo-tool and jenkins-tool so
 # all of them resolve configuration by the same rules: a variable already set
@@ -24,11 +26,28 @@ from pygerrit2 import (  # type: ignore[import-untyped]
 # parent process could not choose the identity of a gerrit it spawned, and
 # exporting GERRIT_USER by hand silently did nothing.
 #
+
+def _load_env_file() -> None:
+    """Load the shared env files, keeping the mode out of them.
+
+    The mode variable is a guardrail, not configuration: it comes from
+    the process environment only, never from a .env file.
+    """
+    protected = os.environ.get(MODE_ENV_VAR)
+    try:
+        load_env_files("gerrit-cli")
+    finally:
+        if protected is None:
+            os.environ.pop(MODE_ENV_VAR, None)
+        else:
+            os.environ[MODE_ENV_VAR] = protected
+
+
 # This runs at import, before a command can report anything, so a
 # GERRIT_CLI_ENV_FILE naming no file is kept and raised as a
 # GerritConfigError where the configuration is first needed.
 try:
-    load_env_files("gerrit-cli")
+    _load_env_file()
     ENV_FILE_ERROR: str | None = None
 except FileNotFoundError as e:
     ENV_FILE_ERROR = str(e)
@@ -150,6 +169,8 @@ class GerritCommentsClient:
             # back to ~/.netrc and adopt an identity nobody asked for.
             self.rest = _ReadOnlyRestAPI(url=self.url, auth=Anonymous())
         self.rest.kwargs["timeout"] = 60
+        # The drafts mode gate rewrites review posts into drafts.
+        self.rest = wrap_rest(self.rest)
 
     @property
     def authenticated(self) -> bool:
@@ -450,6 +471,26 @@ class GerritCommentsClient:
         return self.rest.post(
             f"/changes/{change_number}/revisions/{revision_id}/review",
             json=review_input,
+        )
+
+    def get_drafts(self, change_number: int) -> dict[str, list[dict[str, Any]]]:
+        """Get the draft comments of the logged-in account on a change.
+
+        Returns:
+            Dict mapping file paths to lists of draft comments
+        """
+        return self.rest.get(f"/changes/{change_number}/drafts")
+
+    def publish_drafts(self, change_number: int) -> dict[str, Any]:
+        """Publish every draft comment of the logged-in account on the
+        change, on all patch sets.
+
+        In drafts mode the gate rewrites a review POST into drafts, so
+        this call publishes nothing. cmd_publish_drafts refuses first.
+        """
+        return self.rest.post(
+            f"/changes/{change_number}/revisions/current/review",
+            json={"drafts": "PUBLISH_ALL_REVISIONS"},
         )
 
     def reply_to_comment(

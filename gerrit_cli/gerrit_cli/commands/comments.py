@@ -56,6 +56,7 @@ def cmd_extract(args):
             context_lines=args.context_lines,
             include_system=include_system,
             exclude_ci_bots=not include_ci,
+            exclude_lint_bots=not getattr(args, 'include_lint', False),
         )
 
         since = normalize_since(getattr(args, 'since', None))

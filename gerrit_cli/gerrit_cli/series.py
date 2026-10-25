@@ -393,7 +393,7 @@ class SeriesFinder:
         include_code_context: bool = True,
         context_lines: int = 3,
         exclude_ci_bots: bool = True,
-        exclude_lint_bots: bool = False,
+        exclude_lint_bots: bool = True,
         show_progress: bool = False,
         include_system: bool = False,
     ) -> SeriesComments:
@@ -408,7 +408,7 @@ class SeriesFinder:
             exclude_ci_bots: Whether to exclude messages from CI/build systems
                 (Maloo, Jenkins, etc.). Default True.
             exclude_lint_bots: Whether to exclude messages from lint/style checkers
-                (checkpatch, Janitor Bot, etc.). Default False.
+                (checkpatch, Janitor Bot, etc.). Default True.
             show_progress: If True, show progress indicator to stderr
             include_system: If True, include system messages
 
@@ -707,7 +707,7 @@ def get_series_comments(
     include_code_context: bool = True,
     context_lines: int = 3,
     exclude_ci_bots: bool = True,
-    exclude_lint_bots: bool = False,
+    exclude_lint_bots: bool = True,
 ) -> SeriesComments:
     """
     Get all unresolved comments from all patches in a series.
@@ -720,7 +720,7 @@ def get_series_comments(
         exclude_ci_bots: Whether to exclude messages from CI/build systems
             (Maloo, Jenkins, etc.). Default True.
         exclude_lint_bots: Whether to exclude messages from lint/style checkers
-            (checkpatch, Janitor Bot, etc.). Default False.
+            (checkpatch, Janitor Bot, etc.). Default True.
 
     Returns:
         SeriesComments object with comments grouped by patch

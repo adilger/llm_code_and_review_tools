@@ -98,8 +98,14 @@ def add_extract_parser(subparsers):
     parser.add_argument(
         "--include-ci",
         action="store_true",
-        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest). "
-             "Also enabled by --include-system.",
+        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest, "
+             "Janitor). Also enabled by --include-system.",
+    )
+    parser.add_argument(
+        "--include-lint",
+        action="store_true",
+        help="Include lint/style checker messages (wc-checkpatch, "
+             "Misc Code Checks Robot).",
     )
     view = parser.add_mutually_exclusive_group()
     view.add_argument(
@@ -365,8 +371,14 @@ def add_series_comments_parser(subparsers):
     parser.add_argument(
         "--include-ci",
         action="store_true",
-        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest). "
-             "Also enabled by --include-system.",
+        help="Include CI/build bot messages only (Maloo, Jenkins, Autotest, "
+             "Janitor). Also enabled by --include-system.",
+    )
+    parser.add_argument(
+        "--include-lint",
+        action="store_true",
+        help="Include lint/style checker messages (wc-checkpatch, "
+             "Misc Code Checks Robot).",
     )
     return parser
 
@@ -1441,6 +1453,36 @@ def add_message_parser(subparsers):
     return parser
 
 
+def add_publish_drafts_parser(subparsers):
+    """Add the 'publish-drafts' subcommand parser."""
+    parser = subparsers.add_parser(
+        "publish-drafts",
+        help="Publish your draft comments on a change (full mode only)",
+        description="Publish every draft comment of the logged-in account "
+                    "on a change, on all patchsets. The command refuses "
+                    "in drafts mode. --dry-run lists the drafts in any "
+                    "mode and publishes nothing.",
+    )
+    parser.add_argument("url", help="Gerrit change URL, number or Change-Id")
+    parser.add_argument(
+        "--dry-run", "-n",
+        action="store_true",
+        help="List the drafts that would be published; publish nothing",
+    )
+    parser.add_argument(
+        "--expect-patchset",
+        type=int,
+        metavar="N",
+        help="Refuse unless the change is at patchset N",
+    )
+    parser.add_argument(
+        "--pretty", "-p",
+        action="store_true",
+        help="Pretty-print JSON output",
+    )
+    return parser
+
+
 def add_search_parser(subparsers):
     """Add the 'search' subcommand parser."""
     parser = subparsers.add_parser(
@@ -1639,6 +1681,8 @@ def setup_parsers(subparsers, handlers):
 
     # Top-level messaging
     add_message_parser(subparsers).set_defaults(func=handlers['message'])
+    add_publish_drafts_parser(subparsers).set_defaults(
+        func=handlers['publish_drafts'])
 
     # Help/documentation commands
     add_explain_parser(subparsers).set_defaults(func=handlers['explain'])

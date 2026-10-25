@@ -70,3 +70,35 @@ def test_has_negative_vote_reads_gerrit_string_values():
     assert _has_negative_vote({"Code-Review": "-1"})
     assert _has_negative_vote({"Verified": " 0", "Code-Review": "-2"})
     assert _has_negative_vote({"Verified": "-1", "Code-Review": "+2"})
+
+
+class ActivityClient(FakeClient):
+    """Reviewers with accounts, and the review messages of the change."""
+
+    def get_reviewers(self, change_number):
+        return [
+            {"_account_id": 1, "name": "Andreas Dilger", "username": "adilger",
+             "approvals": {"Code-Review": "+1"}},
+            {"_account_id": 2, "name": "Quiet Reviewer", "username": "quiet",
+             "approvals": {"Code-Review": " 0"}},
+        ]
+
+    def get_change(self, change_number, options=None):
+        change = super().get_change(change_number, options)
+        change["messages"] = [
+            {"author": {"_account_id": 1, "name": "Andreas Dilger"},
+             "date": "2019-06-28 09:00:00.000000000", "message": "Patch Set 4:"},
+            {"author": {"_account_id": 1, "name": "Andreas Dilger"},
+             "date": "2019-06-29 10:00:00.000000000",
+             "message": "Patch Set 4: Code-Review+1"},
+        ]
+        return change
+
+
+def test_reviewer_username_and_last_activity():
+    data = _info_for_change(ActivityClient(), 35302)
+    by_name = {r["name"]: r for r in data["reviewers"]}
+    assert by_name["Andreas Dilger"]["username"] == "adilger"
+    assert by_name["Andreas Dilger"]["last_activity"] == \
+        "2019-06-29 10:00:00.000000000"
+    assert by_name["Quiet Reviewer"]["last_activity"] == ""

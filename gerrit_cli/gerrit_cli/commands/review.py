@@ -5,6 +5,7 @@ import sys
 
 from ..envelope import error_response_from_dict
 from ..errors import ErrorCode, ExitCode
+from ..mode import result_fields
 from ..summary import truncate_review_data, truncate_series_comments
 from ._helpers import (
     _cli,
@@ -109,6 +110,7 @@ def cmd_review(args):
                     "success": True,
                     "comments_posted": result.comments_posted,
                     "vote": result.vote,
+                    **result_fields(),
                 }
                 # A change-level message answers reviewers but resolves
                 # nothing, so the change still reports open comments.
@@ -178,6 +180,7 @@ def cmd_series_comments(args):
             show_progress=False,  # No progress in JSON mode
             include_system=include_system,
             exclude_ci_bots=not include_ci,
+            exclude_lint_bots=not getattr(args, 'include_lint', False),
         )
 
         if fields:

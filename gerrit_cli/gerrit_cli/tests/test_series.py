@@ -695,5 +695,5 @@ class TestConvenienceFunctions:
             include_code_context=True,
             context_lines=3,
             exclude_ci_bots=True,
-            exclude_lint_bots=False,
+            exclude_lint_bots=True,
         )

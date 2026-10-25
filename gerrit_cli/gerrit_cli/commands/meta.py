@@ -868,6 +868,26 @@ use 'gc vote -m'.
         ],
         "related": ["vote", "reply"],
     },
+    "publish-drafts": {
+        "summary": "Publish your draft comments on a change",
+        "description": """
+Publish every draft comment of the logged-in account on a change, on all
+patchsets. Drafts mode exists to stop a publish, so the command refuses
+in drafts mode. --dry-run lists the drafts in any mode.
+--expect-patchset N refuses when the change is at another patchset.
+""",
+        "examples": [
+            {
+                "command": "gc publish-drafts URL --dry-run",
+                "description": "List the drafts that a publish would post",
+            },
+            {
+                "command": "gc publish-drafts URL --expect-patchset 3",
+                "description": "Publish, only if the change is at patchset 3",
+            },
+        ],
+        "related": ["message", "reply", "review"],
+    },
     "abandon": {
         "summary": "Abandon a change",
         "description": """

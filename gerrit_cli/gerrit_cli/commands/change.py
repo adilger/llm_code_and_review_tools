@@ -1,8 +1,11 @@
-"""Change management commands: abandon, restore, rebase, vote, set-topic, message."""
+"""Change management commands: abandon, restore, rebase, vote, set-topic,
+message, publish-drafts."""
 
 import sys
 
 from ..errors import ErrorCode, ExitCode
+from ..mode import (MODE_ENV_VAR, MODE_FULL, DraftModeError, get_mode,
+                    result_fields)
 from ._helpers import _cli, error_code_for, output_error, output_success
 
 
@@ -159,6 +162,8 @@ def cmd_vote(args):
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)
 
+    except DraftModeError as e:
+        sys.exit(output_error(ErrorCode.CONFIG_ERROR, str(e), command, pretty))
     except ValueError as e:
         sys.exit(output_error(ErrorCode.INVALID_INPUT, str(e), command, pretty))
     except Exception as e:
@@ -300,7 +305,79 @@ def cmd_message(args):
             "success": True,
             "change_number": change_number,
             "message": args.text,
+            **result_fields(),
         }
+        output_success(data, command, pretty)
+        sys.exit(ExitCode.SUCCESS)
+
+    except Exception as e:
+        sys.exit(output_error(error_code_for(e), str(e), command, pretty))
+
+
+def cmd_publish_drafts(args):
+    """Publish the draft comments of the logged-in account on a change.
+
+    Drafts mode exists to stop a publish, so the command refuses unless
+    the mode is full. --dry-run lists the drafts in any mode.
+    --expect-patchset refuses when the change is at another patchset.
+    """
+    cli = _cli()
+    command = "publish-drafts"
+    pretty = getattr(args, 'pretty', False)
+
+    try:
+        base_url, change_number = cli.GerritCommentsClient.parse_gerrit_url(args.url)
+        client = cli.GerritCommentsClient()
+
+        info = client.get_change(change_number, ["CURRENT_REVISION"])
+        current = info.get("current_revision_number") or \
+            (info.get("revisions") or {}).get(
+                info.get("current_revision"), {}).get("_number")
+        expect = getattr(args, 'expect_patchset', None)
+        if expect is not None and current != expect:
+            sys.exit(output_error(
+                ErrorCode.INVALID_INPUT,
+                f"change {change_number} is at patchset {current}, "
+                f"not {expect}", command, pretty))
+
+        drafts = [
+            {"path": path, "line": d.get("line"),
+             "patch_set": d.get("patch_set"), "id": d.get("id"),
+             "in_reply_to": d.get("in_reply_to"),
+             "unresolved": d.get("unresolved"),
+             "message": d.get("message", "")}
+            for path, items in (client.get_drafts(change_number) or {}).items()
+            for d in items
+        ]
+        data = {
+            "change_number": change_number,
+            "current_patchset": current,
+            "drafts": drafts,
+            "count": len(drafts),
+            **result_fields(),
+        }
+
+        if getattr(args, 'dry_run', False):
+            data.update(dry_run=True, published=False,
+                        would_publish=len(drafts),
+                        mode_allows_publish=get_mode() == MODE_FULL)
+            output_success(data, command, pretty)
+            sys.exit(ExitCode.SUCCESS)
+
+        if get_mode() != MODE_FULL:
+            sys.exit(output_error(
+                ErrorCode.CONFIG_ERROR,
+                f"{MODE_ENV_VAR} is not '{MODE_FULL}': drafts mode publishes "
+                f"nothing. Publish in the Gerrit web UI, or have the "
+                f"account owner run this command in full mode.", command,
+                pretty))
+        if not drafts:
+            data.update(success=True, published=False)
+            output_success(data, command, pretty)
+            sys.exit(ExitCode.SUCCESS)
+
+        client.publish_drafts(change_number)
+        data.update(success=True, published=True)
         output_success(data, command, pretty)
         sys.exit(ExitCode.SUCCESS)
 

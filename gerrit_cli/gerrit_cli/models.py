@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .mode import result_fields
+
 
 @dataclass
 class Author:
@@ -306,6 +308,7 @@ class ReplyResult:
             "message": self.message,
             "marked_resolved": self.marked_resolved,
             "error": self.error,
+            **result_fields(),
         }
 
 

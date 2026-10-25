@@ -51,6 +51,7 @@ from .change import (
     cmd_vote,
     cmd_set_topic,
     cmd_message,
+    cmd_publish_drafts,
 )
 from .reviewers import (
     cmd_reviewers,
@@ -105,6 +106,7 @@ __all__ = [
     "cmd_vote",
     "cmd_set_topic",
     "cmd_message",
+    "cmd_publish_drafts",
     "cmd_reviewers",
     "cmd_add_reviewer",
     "cmd_remove_reviewer",
