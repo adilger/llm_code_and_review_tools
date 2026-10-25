@@ -182,6 +182,16 @@ def _info_for_change(client, change_number, show_bots=False):
     # only way to see the veto was a flag nobody following the documented
     # workflow would think to pass.
     reviewers_raw = client.get_reviewers(change_number)
+    msgs = change.get("messages") or []
+    # The date of the newest review message from each account. A vote
+    # or a comment makes a message, so this is the last activity.
+    last_activity = {}
+    for m in msgs:
+        author = m.get('author', {})
+        key = author.get('_account_id', author.get('name'))
+        last_activity[key] = max(last_activity.get(key, ''),
+                                 m.get('date', ''))
+
     reviewers = []
     for r in reviewers_raw:
         name = r.get("name", "")
@@ -194,10 +204,15 @@ def _info_for_change(client, change_number, show_bots=False):
             and not _has_negative_vote(approvals)
         ):
             continue
-        reviewers.append({
+        entry = {
             "name": name,
             "approvals": approvals,
-        })
+        }
+        if r.get("username"):
+            entry["username"] = r["username"]
+        entry["last_activity"] = last_activity.get(
+            r.get("_account_id", name), "")
+        reviewers.append(entry)
 
     results_ps = ci_parse.ci_relevant_ps(change)
     tests = ci_parse.parse_tests(change)
