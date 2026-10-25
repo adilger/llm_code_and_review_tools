@@ -25,7 +25,7 @@ from llm_tool_common.envelope import (
 from llm_tool_common.errors import exit_code_for
 from llm_tool_common.update_check import maybe_check_for_updates
 
-from .client import MalooClient, resolve_patchset_commit
+from .client import GerritLookupError, MalooClient, get_patchset_revisions
 from .config import load_config
 from .errors import EXIT_CODES, ErrorCode, ExitCode, ToolError
 
@@ -543,7 +543,7 @@ def review(
     REVIEW_ID is the Gerrit change number.  Maloo stores no change
     number to query -- code_reviews carries only a commit hash -- so
     the patchset is resolved to its revision SHA automatically via
-    Gerrit's public REST API.  Pass --commit <sha> to query an exact
+    Gerrit's REST API, with the gerrit CLI's login when one is set.  Pass --commit <sha> to query an exact
     revision directly instead (e.g. from `gerrit info <review>`).
 
     By default only the review's current (latest) patchset is queried.
@@ -553,41 +553,36 @@ def review(
     """
     client = _make_client()
 
-    if all_patchsets and not commit_id:
-        current = _resolve_current_patchset(review_id)
-        if current is None:
+    if not commit_id:
+        try:
+            revisions, current = get_patchset_revisions(review_id)
+        except GerritLookupError as exc:
             _error(
                 ErrorCode.RESOLVE_FAILED,
-                f"Could not resolve Gerrit change {review_id} to its "
-                "current patchset. Is the gerrit CLI available?",
-                "review", pretty,
-            )
-            return
-    elif not commit_id:
-        commit_id = resolve_patchset_commit(review_id, patch)
-        if commit_id is None:
-            _error(
-                ErrorCode.RESOLVE_FAILED,
-                f"Could not resolve Gerrit change {review_id} "
-                f"(patch {patch if patch is not None else 'current'}) "
-                "to a commit hash via Gerrit's REST API. Pass "
-                f"--commit <sha> directly, e.g. from "
+                f"Could not resolve Gerrit change {review_id}: {exc}. "
+                f"Pass --commit <sha> directly, e.g. from "
                 f"`gerrit info {review_id}`.",
                 "review", pretty,
             )
             return
-        if patch is None:
-            # Report which patchset was actually queried.
-            patch = _resolve_current_patchset(review_id)
+        if not all_patchsets:
+            if patch is None:
+                patch = current
+            commit_id = revisions.get(patch)
+            if commit_id is None:
+                _error(
+                    ErrorCode.RESOLVE_FAILED,
+                    f"Gerrit change {review_id} has no patchset {patch} "
+                    f"(current is {current}).",
+                    "review", pretty,
+                )
+                return
 
     try:
         if all_patchsets and not commit_id:
             sessions = []
             seen_ids: set[str] = set()
-            for p in range(1, current + 1):
-                commit = resolve_patchset_commit(review_id, p)
-                if commit is None:
-                    continue
+            for _, commit in sorted(revisions.items()):
                 try:
                     patch_sessions = client.find_sessions_by_commit(commit)
                 except Exception:
@@ -1313,73 +1308,6 @@ def test_history(
     _output(env, pretty)
 
 
-def _resolve_review_to_revision(review_id: int) -> tuple[str | None, str]:
-    """Resolve a Gerrit change number to its current patchset revision hash.
-
-    Uses the gerrit CLI tool to look up the change.  Returns the commit
-    hash and an empty string, or None and why the lookup failed -- the
-    caller has nothing else to tell the user with.
-    """
-    import json
-    import subprocess
-
-    argv = ["gerrit", "info", str(review_id)]
-    shown = " ".join(argv)
-    try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=15,
-        )
-    except FileNotFoundError:
-        return None, f"`{shown}` is not installed"
-    except subprocess.TimeoutExpired:
-        return None, f"`{shown}` timed out after 15s"
-    except Exception as exc:
-        return None, f"`{shown}` failed: {exc}"
-
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        return None, (
-            f"`{shown}` exited {proc.returncode}"
-            + (f": {detail[0]}" if detail else "")
-        )
-    try:
-        data = json.loads(proc.stdout)
-    except ValueError:
-        return None, f"`{shown}` did not print JSON"
-    # The gerrit CLI prints the bare payload; --envelope wraps it in "data".
-    if isinstance(data.get("data"), dict):
-        data = data["data"]
-    revision = data.get("current_revision")
-    if not revision:
-        return None, f"`{shown}` gave no current_revision"
-    return revision, ""
-
-
-def _resolve_current_patchset(review_id: int) -> int | None:
-    """Resolve a Gerrit change number to its current patchset number.
-
-    Uses the gerrit CLI tool to look up the change.  Returns None if
-    the lookup fails, in which case the caller reports that instead
-    of guessing.
-    """
-    import json
-    import subprocess
-
-    try:
-        proc = subprocess.run(
-            ["gerrit", "info", str(review_id)],
-            capture_output=True, text=True, timeout=15,
-        )
-        if proc.returncode != 0:
-            return None
-        data = json.loads(proc.stdout)
-        if isinstance(data.get("data"), dict):
-            data = data["data"]
-        return data.get("current_patchset")
-    except Exception:
-        return None
-
-
 def _parse_review_arg(value: str) -> str:
     """Parse a --review value into a change number or commit hash.
 
@@ -1462,7 +1390,8 @@ def queue(
 
     --review accepts a Gerrit change number (e.g. 64266), a full
     Gerrit URL, or a commit hash.  Change numbers are automatically
-    resolved to commit hashes via the gerrit CLI.
+    resolved to their current patchset's commit hash via Gerrit's
+    REST API.
 
     --branch accepts a git branch name (e.g. b_es6_0, master) or a
     Jenkins job name (e.g. lustre-b_es-reviews, lustre-reviews).
@@ -1483,23 +1412,23 @@ def queue(
     resolved_review = review_id  # track what we actually queried with
     if review_id is not None:
         review_id = _parse_review_arg(review_id)
-        # If it looks like a pure integer (Gerrit change number),
-        # resolve to the current patchset commit hash via gerrit CLI.
+        # A pure integer is a Gerrit change number: resolve it to the
+        # current patchset's commit hash.
         if review_id.isdigit():
-            revision, why = _resolve_review_to_revision(int(review_id))
-            if revision:
-                params["review_id"] = revision
-                resolved_review = revision
-            else:
+            try:
+                revisions, current = get_patchset_revisions(int(review_id))
+            except GerritLookupError as exc:
                 _error(
                     ErrorCode.RESOLVE_FAILED,
                     f"Could not resolve Gerrit change {review_id} to a "
-                    f"commit hash: {why}. Try --build <buildno> or pass "
+                    f"commit hash: {exc}. Try --build <buildno> or pass "
                     f"the commit hash directly.",
                     "queue",
                     pretty,
                 )
                 return
+            params["review_id"] = revisions[current]
+            resolved_review = revisions[current]
         else:
             # Assume it's already a commit hash
             params["review_id"] = review_id

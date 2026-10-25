@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, Mock, patch, PropertyMock
 import pytest
 import requests
 
-from maloo_tool.client import MalooClient, resolve_patchset_commit
+from maloo_tool.client import (
+    GerritLookupError,
+    MalooClient,
+    get_patchset_revisions,
+)
 from maloo_tool.config import MalooConfig
 
 
@@ -316,48 +320,67 @@ class TestFindSessionsByCommit:
 
 
 # ---------------------------------------------------------------------------
-# resolve_patchset_commit
+# get_patchset_revisions
 # ---------------------------------------------------------------------------
 
-class TestResolvePatchsetCommit:
-    """Resolves a change/patchset to its revision SHA via Gerrit's own
-    public REST API, so callers don't have to look it up by hand."""
+CHANGE_JSON = (
+    ")]}'\n"
+    '{"current_revision": "bbbb", "revisions": '
+    '{"aaaa": {"_number": 1}, "bbbb": {"_number": 2}}}'
+)
 
-    def test_resolves_current_patchset_by_default(self, monkeypatch):
-        captured = {}
 
-        def fake_get(url, timeout):
-            captured["url"] = url
-            return Mock(status_code=200, text=")]}'\n{\"commit\": \"deadbeef\"}")
+class TestGetPatchsetRevisions:
+    """Resolves a change's patchsets to revision SHAs via Gerrit's own
+    REST API, so callers don't have to look them up by hand."""
 
+    @pytest.fixture(autouse=True)
+    def _no_gerrit_login(self, monkeypatch):
+        monkeypatch.setattr("maloo_tool.client._gerrit_auth", lambda: None)
+
+    def _fake_get(self, monkeypatch, response, captured=None):
+        def fake_get(url, params, auth, timeout):
+            if captured is not None:
+                captured.update(url=url, params=params, auth=auth)
+            if isinstance(response, Exception):
+                raise response
+            return response
         monkeypatch.setattr("maloo_tool.client.requests.get", fake_get)
-        assert resolve_patchset_commit(64266) == "deadbeef"
-        assert captured["url"].endswith("/changes/64266/revisions/current/commit")
 
-    def test_resolves_a_specific_patchset(self, monkeypatch):
+    def test_maps_every_patchset_and_the_current_one(self, monkeypatch):
         captured = {}
+        self._fake_get(monkeypatch, Mock(status_code=200, text=CHANGE_JSON),
+                       captured)
+        assert get_patchset_revisions(64266) == ({1: "aaaa", 2: "bbbb"}, 2)
+        assert captured["url"].endswith("/changes/64266")
+        assert "/a/" not in captured["url"]
+        assert captured["params"] == {"o": "ALL_REVISIONS"}
 
-        def fake_get(url, timeout):
-            captured["url"] = url
-            return Mock(status_code=200, text='{"commit": "cafef00d"}')
+    def test_authenticates_when_a_login_is_configured(self, monkeypatch):
+        """A change in a non-public project 404s to an anonymous read."""
+        captured = {}
+        monkeypatch.setattr("maloo_tool.client._gerrit_auth",
+                            lambda: ("user", "pass"))
+        self._fake_get(monkeypatch, Mock(status_code=200, text=CHANGE_JSON),
+                       captured)
+        get_patchset_revisions(69882)
+        assert "/a/changes/69882" in captured["url"]
+        assert captured["auth"] == ("user", "pass")
 
-        monkeypatch.setattr("maloo_tool.client.requests.get", fake_get)
-        assert resolve_patchset_commit(64266, patch=3) == "cafef00d"
-        assert captured["url"].endswith("/changes/64266/revisions/3/commit")
+    def test_http_error_says_why(self, monkeypatch):
+        self._fake_get(monkeypatch, Mock(status_code=404, text="Not Found"))
+        with pytest.raises(GerritLookupError, match="HTTP 404.*no Gerrit login"):
+            get_patchset_revisions(999999999)
 
-    def test_returns_none_on_http_error(self, monkeypatch):
-        monkeypatch.setattr(
-            "maloo_tool.client.requests.get",
-            lambda url, timeout: Mock(status_code=404, text="Not Found"),
-        )
-        assert resolve_patchset_commit(999999999) is None
+    def test_network_error_says_why(self, monkeypatch):
+        self._fake_get(monkeypatch, requests.exceptions.ConnectionError("boom"))
+        with pytest.raises(GerritLookupError, match="boom"):
+            get_patchset_revisions(64266)
 
-    def test_returns_none_on_network_error(self, monkeypatch):
-        def raise_error(url, timeout):
-            raise requests.exceptions.ConnectionError("boom")
-
-        monkeypatch.setattr("maloo_tool.client.requests.get", raise_error)
-        assert resolve_patchset_commit(64266) is None
+    def test_malformed_reply_says_why(self, monkeypatch):
+        self._fake_get(monkeypatch, Mock(status_code=200, text="{}"))
+        with pytest.raises(GerritLookupError, match="no revisions"):
+            get_patchset_revisions(64266)
 
 
 # ---------------------------------------------------------------------------

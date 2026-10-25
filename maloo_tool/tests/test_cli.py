@@ -8,7 +8,6 @@ import json
 import os
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +20,7 @@ from maloo_tool.cli import (
     _parse_review_arg,
     _resolve_branch_to_job,
 )
+from maloo_tool.client import GerritLookupError
 
 # Valid UUIDs for test data (required by _extract_session_id regex)
 SID_1 = "11111111-1111-1111-1111-111111111111"
@@ -427,17 +427,15 @@ class TestReview:
             },
         ]
         with patch(
-            "maloo_tool.cli.resolve_patchset_commit", return_value="c" * 40
-        ) as resolve_mock, patch(
-            "maloo_tool.cli._resolve_current_patchset", return_value=7
-        ):
+            "maloo_tool.cli.get_patchset_revisions", return_value=({6: "b" * 40, 7: "c" * 40}, 7)
+        ) as resolve_mock:
             result = runner.invoke(main, ["--envelope", "review", "54321"])
         env = _parse_output(result)
         assert env["ok"] is True
         assert env["data"]["commit"] == "c" * 40
         assert env["data"]["patch"] == 7
         assert env["data"]["session_count"] == 1
-        resolve_mock.assert_called_once_with(54321, None)
+        resolve_mock.assert_called_once_with(54321)
         mock_client.find_sessions_by_commit.assert_called_once_with("c" * 40)
 
     def test_review_not_found(self, runner, mock_client):
@@ -453,7 +451,8 @@ class TestReview:
         """When the patchset can't be resolved to a commit, say so instead
         of falling back to an unfiltered (and previously unbounded) scan."""
         with patch(
-            "maloo_tool.cli.resolve_patchset_commit", return_value=None
+            "maloo_tool.cli.get_patchset_revisions",
+            side_effect=GerritLookupError("Gerrit returned HTTP 404"),
         ):
             result = runner.invoke(main, ["--envelope", "review", "54321"])
         assert result.exit_code == 1
@@ -464,13 +463,33 @@ class TestReview:
 
     def test_review_api_error(self, runner, mock_client):
         mock_client.find_sessions_by_commit.side_effect = RuntimeError("boom")
-        with patch(
-            "maloo_tool.cli.resolve_patchset_commit", return_value="c" * 40
-        ):
+        with patch("maloo_tool.cli.get_patchset_revisions", return_value=({1: "c" * 40}, 1)):
             result = runner.invoke(main, ["--envelope", "review", "54321"])
         env = json.loads(result.output)
         assert env["ok"] is False
         assert env["error"]["code"] == "API_ERROR"
+
+    def test_review_specific_patch(self, runner, mock_client):
+        mock_client.find_sessions_by_commit.return_value = []
+        with patch("maloo_tool.cli.get_patchset_revisions", return_value=({1: "a" * 40, 2: "b" * 40}, 2)):
+            result = runner.invoke(
+                main, ["--envelope", "review", "54321", "--patch", "1"]
+            )
+        env = _parse_output(result)
+        assert env["data"]["patch"] == 1
+        mock_client.find_sessions_by_commit.assert_called_once_with("a" * 40)
+
+    def test_review_missing_patch_reports_resolve_failed(
+        self, runner, mock_client
+    ):
+        with patch("maloo_tool.cli.get_patchset_revisions", return_value=({1: "a" * 40}, 1)):
+            result = runner.invoke(
+                main, ["--envelope", "review", "54321", "--patch", "5"]
+            )
+        env = json.loads(result.output)
+        assert env["error"]["code"] == "RESOLVE_FAILED"
+        assert "no patchset 5" in env["error"]["message"]
+        mock_client.find_sessions_by_commit.assert_not_called()
 
     def test_review_all_patchsets(self, runner, mock_client):
         session = {
@@ -482,10 +501,7 @@ class TestReview:
         }
         mock_client.find_sessions_by_commit.return_value = [session]
         with patch(
-            "maloo_tool.cli._resolve_current_patchset", return_value=2
-        ), patch(
-            "maloo_tool.cli.resolve_patchset_commit",
-            side_effect=["d" * 40, "e" * 40],
+            "maloo_tool.cli.get_patchset_revisions", return_value=({1: "d" * 40, 2: "e" * 40}, 2)
         ):
             result = runner.invoke(
                 main, ["--envelope", "review", "54321", "--all-patchsets"]
@@ -1075,8 +1091,7 @@ class TestQueue:
             },
         ]
 
-        with patch("maloo_tool.cli._resolve_review_to_revision",
-                    return_value=("abc123def456", "")):
+        with patch("maloo_tool.cli.get_patchset_revisions", return_value=({3: "abc123def456"}, 3)):
             result = runner.invoke(main, ["--envelope", "queue", "--review", "54321"])
         env = _parse_output(result)
         assert env["ok"] is True
@@ -1492,15 +1507,15 @@ class TestQueueBranchResolution:
         assert env["data"]["queue_entries"][0]["buildno"] == 27341
 
     def test_queue_review_resolve_failure(self, runner, mock_client):
-        """When gerrit CLI fails to resolve, should error."""
-        with patch("maloo_tool.cli._resolve_review_to_revision",
-                    return_value=(None, "`gerrit info 64266` exited 1")):
+        """When Gerrit cannot resolve the change, should error."""
+        with patch("maloo_tool.cli.get_patchset_revisions",
+                   side_effect=GerritLookupError("Gerrit returned HTTP 404")):
             result = runner.invoke(main, ["--envelope", "queue", "--review", "64266"])
         env = json.loads(result.output)
         assert env["ok"] is False
         assert "resolve" in env["error"]["message"].lower()
         # The reason the lookup failed is what the user has to act on.
-        assert "exited 1" in env["error"]["message"]
+        assert "HTTP 404" in env["error"]["message"]
 
     def test_queue_review_with_commit_hash(self, runner, mock_client):
         """Commit hash should be passed through without resolution."""
@@ -1518,52 +1533,6 @@ class TestQueueBranchResolution:
         env = json.loads(result.output)
         assert env["ok"] is False
         assert result.exit_code != 0
-
-
-class TestResolveReviewToRevision:
-    """The gerrit CLI prints the bare payload; --envelope wraps it."""
-
-    def _run(self, stdout="", stderr="", returncode=0):
-        from maloo_tool.cli import _resolve_review_to_revision
-        proc = SimpleNamespace(
-            stdout=stdout, stderr=stderr, returncode=returncode
-        )
-        with patch("subprocess.run", return_value=proc):
-            return _resolve_review_to_revision(54749)
-
-    def test_bare_payload(self):
-        revision, why = self._run(
-            stdout=json.dumps({"change_number": 54749, "current_revision": "68414988"})
-        )
-        assert revision == "68414988"
-        assert why == ""
-
-    def test_envelope_payload(self):
-        revision, why = self._run(
-            stdout=json.dumps(
-                {"ok": True, "data": {"current_revision": "68414988"}}
-            )
-        )
-        assert revision == "68414988"
-        assert why == ""
-
-    def test_nonzero_exit_says_why(self):
-        revision, why = self._run(stderr="404 Not Found", returncode=1)
-        assert revision is None
-        assert "exited 1" in why
-        assert "404 Not Found" in why
-
-    def test_missing_revision_says_why(self):
-        revision, why = self._run(stdout=json.dumps({"change_number": 54749}))
-        assert revision is None
-        assert "current_revision" in why
-
-    def test_not_installed_says_why(self):
-        from maloo_tool.cli import _resolve_review_to_revision
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
-            revision, why = _resolve_review_to_revision(54749)
-        assert revision is None
-        assert "not installed" in why
 
 
 # -- retest command: additional tests --
@@ -1955,7 +1924,8 @@ class TestExplicitErrorExitCodes:
         self._error(
             runner.invoke(main, ["link-bug", TSID_1, "LU-1"]), "LINK_FAILED", 1
         )
-        with patch("maloo_tool.cli.resolve_patchset_commit", return_value=None):
+        with patch("maloo_tool.cli.get_patchset_revisions",
+                   side_effect=GerritLookupError("HTTP 404")):
             self._error(
                 runner.invoke(main, ["review", "54321"]), "RESOLVE_FAILED", 1
             )
