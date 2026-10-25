@@ -43,6 +43,19 @@ class TestBuildCmd:
                        "--verbose", "--output-format", "stream-json",
                        "--model", "opus", "--extra"]
 
+    def test_claude_allowlist_replaces_skip_permissions(self):
+        cmd = get_agent("claude").build_cmd(
+            "opus", None, [], PROMPT,
+            allowed_tools=["Read", "Bash(git log *)"])
+        assert "--dangerously-skip-permissions" not in cmd
+        assert cmd[3:7] == ["--permission-mode", "dontAsk",
+                            "--allowedTools", "Read,Bash(git log *)"]
+
+    def test_allowlist_needs_claude(self):
+        with pytest.raises(ValueError, match="needs the claude agent"):
+            get_agent("codex").build_cmd(None, None, [], PROMPT,
+                                         allowed_tools=["Read"])
+
     def test_claude_effort(self):
         cmd = get_agent("claude").build_cmd("opus", "xhigh", [], PROMPT)
         assert cmd[-4:] == ["--model", "opus", "--effort", "xhigh"]

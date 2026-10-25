@@ -399,6 +399,10 @@ def cmd_run(args) -> int:
               "--local ref, or the checked-out HEAD)")
         return 1
 
+    if args.allow_tool and args.agent != "claude":
+        print("error: --allow-tool needs the claude agent")
+        return 1
+
     prompts_status = ensure_prompts(args)
     if prompts_status is None:
         return 2
@@ -622,6 +626,7 @@ def cmd_run(args) -> int:
         lean=args.lean,
         preload=args.preload,
         agent_args=args.agent_arg or [],
+        allowed_tools=args.allow_tool or [],
     )
     try:
         results = run_batch(config, changes, in_place=in_place)
@@ -1174,6 +1179,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ARG",
         help="Extra argument passed through to the agent CLI (repeatable; "
              "use --agent-arg=--flag for arguments starting with a dash)")
+    run_p.add_argument(
+        "--allow-tool", action="append", dest="allow_tool", metavar="RULE",
+        help="Claude agent: a permission rule, for example "
+             "'Bash(git log *)' (repeatable). With one or more rules the "
+             "review runs with --permission-mode dontAsk and only these "
+             "tools, in place of --dangerously-skip-permissions. "
+             "{worktree} and {prompts} expand to the review worktree and "
+             "the prompts directory: 'Edit(/{worktree}/**)'")
     run_p.add_argument(
         "--post", action="store_true",
         help="Post results with findings to their provider when the batch finishes")

@@ -350,6 +350,9 @@ class BatchConfig:
     # Added to the agent's environment (e.g. lreview bench's offline PATH)
     env: dict = field(default_factory=dict)
     agent_args: list[str] = field(default_factory=list)
+    # Claude only: permission rules for an allowlist run (see
+    # expand_allowed_tools). Empty: --dangerously-skip-permissions.
+    allowed_tools: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # git -C <repo> resolves relative paths against the repo, not
@@ -359,6 +362,11 @@ class BatchConfig:
         self.worktrees_dir = Path(self.worktrees_dir).expanduser().resolve()
         self.prompts_dir = Path(self.prompts_dir).expanduser().resolve()
         get_agent(self.agent)  # fail fast on unknown agents
+        if self.allowed_tools and self.agent != "claude":
+            raise ValueError("--allow-tool needs the claude agent")
+        for rule in self.allowed_tools:
+            if "," in rule:
+                raise ValueError(f"--allow-tool rule has a comma: {rule}")
         # A model that cannot do the requested effort only fails once
         # codex is running, after the worktree is built — check here,
         # before anything expensive happens.
@@ -542,6 +550,25 @@ def compaction_settings(doc: Path) -> str:
     }]}})
 
 
+def expand_allowed_tools(config: BatchConfig,
+                         worktree: Optional[Path]) -> list[str]:
+    """Return the allowlist rules with the placeholders filled in.
+
+    {worktree} is the review worktree and {prompts} is the prompts
+    directory, both absolute. A Read or Edit rule takes an absolute
+    path with a leading "//", so "Edit(/{worktree}/**)" lets the agent
+    write only inside its worktree.
+    """
+    wt_text = str(worktree) if worktree is not None else ""
+    out = []
+    for rule in config.allowed_tools:
+        if "{worktree}" in rule and not wt_text:
+            raise ValueError(f"no worktree for the rule {rule}")
+        out.append(rule.replace("{worktree}", wt_text)
+                   .replace("{prompts}", str(config.prompts_dir)))
+    return out
+
+
 def build_agent_cmd(config: BatchConfig,
                     change: Optional[ResolvedChange] = None,
                     session=None,
@@ -567,7 +594,8 @@ def build_agent_cmd(config: BatchConfig,
         system_file=(str(preload_file(config))
                      if _preloading(config, change)
                      and config.agent == "claude" else None),
-        prompt_on_stdin=_prompt_on_stdin(config, change))
+        prompt_on_stdin=_prompt_on_stdin(config, change),
+        allowed_tools=expand_allowed_tools(config, worktree))
 
 
 def prepare_worktree(config: BatchConfig, change: ResolvedChange) -> Path:

@@ -70,18 +70,27 @@ class AgentSpec:
         lean: bool = False,
         system_file: Optional[str] = None,
         prompt_on_stdin: bool = False,
+        allowed_tools: Optional[list[str]] = None,
     ) -> list[str]:
         # resume and settings are claude's: a session to fork and
         # continue, and per-run settings (hooks). Other agents ignore
         # both.  lean: see LEAN_CLAUDE_ARGS.
+        # allowed_tools, claude only: run with --permission-mode
+        # dontAsk and this allowlist in place of
+        # --dangerously-skip-permissions. The agent cannot use a tool
+        # that the list does not name, and nothing prompts.
         # effort: claude gets --effort; codex gets a config override
         # for model_reasoning_effort (Codex has no --effort flag).
         # gemini/opencode ignore it (the CLI warns when dropped).
         # extra_args come after so a later --agent-arg=-c can override.
         if self.name == "claude":
-            cmd = ["claude", "-p", prompt_text,
-                   "--dangerously-skip-permissions",
-                   "--verbose", "--output-format", "stream-json"]
+            cmd = ["claude", "-p", prompt_text]
+            if allowed_tools:
+                cmd += ["--permission-mode", "dontAsk",
+                        "--allowedTools", ",".join(allowed_tools)]
+            else:
+                cmd += ["--dangerously-skip-permissions"]
+            cmd += ["--verbose", "--output-format", "stream-json"]
             if model:
                 cmd += ["--model", model]
             if effort:
@@ -95,6 +104,8 @@ class AgentSpec:
             if system_file:
                 cmd += ["--append-system-prompt-file", system_file]
             return cmd + extra_args
+        if allowed_tools:
+            raise ValueError("--allow-tool needs the claude agent")
         if self.name == "codex":
             # --json makes exec stream JSONL events (thread/turn/item)
             # instead of prose, ending in the turn.completed usage the
