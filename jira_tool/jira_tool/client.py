@@ -1465,6 +1465,32 @@ class JiraClient:
         }
         return self._request("GET", "user/search", params=params, context=f"user search: {query}")
 
+    def search_assignable_users(
+        self,
+        query: str,
+        projects: list[str],
+        max_results: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Search users who can be assigned in any of *projects* (Cloud).
+
+        Cloud user/search returns an empty list with HTTP 200 when the
+        account lacks the global Browse users and groups permission.
+        user/assignable/search needs only Browse Projects, so it still
+        finds people.  It covers assignable users only.
+        """
+        found: dict[str, dict[str, Any]] = {}
+        for project in projects:
+            users = self._request(
+                "GET", "user/assignable/search",
+                params={"query": query, "project": project,
+                        "maxResults": str(max_results)},
+                context=f"assignable user search: {query} in {project}",
+            )
+            for u in users:
+                found.setdefault(u.get("accountId") or u.get("name"), u)
+        return list(found.values())[:max_results]
+
     def get_user(self, username: str) -> dict[str, Any]:
         """
         Look up one Server user by exact username.

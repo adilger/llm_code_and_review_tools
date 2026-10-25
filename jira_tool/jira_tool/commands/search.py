@@ -61,10 +61,11 @@ def register(main):
     @click.argument("jql")
     @click.option("--limit", default=20, help="Maximum results to return (default: 20)")
     @click.option("--offset", default=0, help="Skip first N results (default: 0)")
+    @click.option("--page-token", help="Cloud only: resume from a next_page_token (overrides --offset)")
     @click.option("--fields", help="Comma-separated list of fields to return")
     @click.option("--output", "output_field_name", help="Output only this field from each issue (one per line)")
     @click.pass_context
-    def issue_search(ctx: click.Context, jql: str, limit: int, offset: int, fields: str | None, output_field_name: str | None) -> None:
+    def issue_search(ctx: click.Context, jql: str, limit: int, offset: int, page_token: str | None, fields: str | None, output_field_name: str | None) -> None:
         """
         Search for issues using JQL.
 
@@ -87,26 +88,41 @@ def register(main):
 
             field_list = fields.split(",") if fields else None
 
-            # Cloud v3 uses token-based pagination (no startAt/offset)
+            # Cloud v3 has no startAt: it pages by token only.  Honour
+            # --offset by walking pages and dropping the first N issues.
             is_cloud = client.config.is_cloud
             all_issues: list[dict] = []
-            next_token = None
+            next_token = page_token
 
             if is_cloud:
-                # Paginate with nextPageToken to collect up to `limit` results
+                skip = 0 if page_token else offset
                 remaining = limit
+                raw_results: dict = {}
                 while remaining > 0:
-                    page_size = min(remaining, 100)
+                    # Skipped pages need no fields; keep them small.
+                    page_issues_fields = ["summary"] if skip >= 100 else field_list
+                    page_size = min(skip + remaining, 100)
                     raw_results = client.search_issues(
-                        jql, fields=field_list,
+                        jql, fields=page_issues_fields,
                         max_results=page_size,
                         next_page_token=next_token,
                     )
                     page_issues = raw_results.get("issues", [])
+                    next_token = raw_results.get("nextPageToken")
+                    if skip:
+                        drop = min(skip, len(page_issues))
+                        skip -= drop
+                        page_issues = page_issues[drop:]
+                        if skip:
+                            # Whole page skipped; the field list was minimal.
+                            if raw_results.get("isLast", True) or not next_token:
+                                break
+                            continue
+                    page_issues = page_issues[:remaining]
                     all_issues.extend(page_issues)
                     remaining -= len(page_issues)
-                    next_token = raw_results.get("nextPageToken")
-                    if raw_results.get("isLast", True) or not page_issues or not next_token:
+                    if raw_results.get("isLast", True) or not next_token:
+                        next_token = None
                         break
             else:
                 raw_results = client.search_issues(
@@ -148,7 +164,7 @@ def register(main):
                 "jql": jql,
                 "issues": issues,
                 "pagination": {
-                    "offset": raw_results.get("startAt", offset) if not is_cloud else 0,
+                    "offset": raw_results.get("startAt", offset) if not is_cloud else offset,
                     "limit": limit,
                     "returned": len(issues),
                     "total": total,
