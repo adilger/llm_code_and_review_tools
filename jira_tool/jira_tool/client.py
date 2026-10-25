@@ -139,6 +139,10 @@ class JiraClient:
         if auth_header:
             headers["Authorization"] = auth_header
         self._session.headers.update(headers)
+        # A no-op auth callable stops requests from reading ~/.netrc, which
+        # would otherwise replace the Authorization header set above with
+        # Basic auth. Proxy and CA-bundle environment support is retained.
+        self._session.auth = lambda request: request
 
     # Jira's search API is a POST that only reads, so the HTTP method
     # alone cannot decide whether an operation writes.
