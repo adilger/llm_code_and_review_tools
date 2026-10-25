@@ -66,7 +66,8 @@ def get_tool_description() -> ToolDescription:
                 arguments=[
                     Argument(name="jql", description="JIRA Query Language query string", required=True),
                     Argument(name="--limit", description="Maximum results", type="integer", default=20),
-                    Argument(name="--offset", description="Skip first N results", type="integer", default=0),
+                    Argument(name="--offset", description="Skip first N results (Cloud walks pages to honour it)", type="integer", default=0),
+                    Argument(name="--page-token", description="Cloud only: resume from a pagination.next_page_token (overrides --offset)"),
                     Argument(name="--fields", description="Comma-separated fields to return"),
                     Argument(name="--output", description="Output only this field from each issue (one per line)"),
                 ],
@@ -382,10 +383,11 @@ def get_tool_description() -> ToolDescription:
             Command(
                 name="users",
                 description="Search for users by name, username, or email",
-                usage="jira users <QUERY> [--limit N]",
+                usage="jira users <QUERY> [--limit N] [--project KEY]",
                 arguments=[
                     Argument(name="query", description="Search string (matches username, display name, email)", required=True),
                     Argument(name="--limit", description="Maximum results to return", type="integer", default=10),
+                    Argument(name="--project", description="Cloud fallback: project whose assignable users to search (repeatable; default: the JIRA_CLOUD_PROJECTS projects)"),
                 ],
                 examples=["jira users john", "jira users pfarrell --limit 5"],
                 output_fields=["query", "total", "users[].name", "users[].display_name", "users[].email", "users[].active"],

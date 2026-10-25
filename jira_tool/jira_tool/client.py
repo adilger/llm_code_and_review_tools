@@ -139,6 +139,10 @@ class JiraClient:
         if auth_header:
             headers["Authorization"] = auth_header
         self._session.headers.update(headers)
+        # A no-op auth callable stops requests from reading ~/.netrc, which
+        # would otherwise replace the Authorization header set above with
+        # Basic auth. Proxy and CA-bundle environment support is retained.
+        self._session.auth = lambda request: request
 
     # Jira's search API is a POST that only reads, so the HTTP method
     # alone cannot decide whether an operation writes.
@@ -1460,6 +1464,32 @@ class JiraClient:
             "maxResults": str(max_results),
         }
         return self._request("GET", "user/search", params=params, context=f"user search: {query}")
+
+    def search_assignable_users(
+        self,
+        query: str,
+        projects: list[str],
+        max_results: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Search users who can be assigned in any of *projects* (Cloud).
+
+        Cloud user/search returns an empty list with HTTP 200 when the
+        account lacks the global Browse users and groups permission.
+        user/assignable/search needs only Browse Projects, so it still
+        finds people.  It covers assignable users only.
+        """
+        found: dict[str, dict[str, Any]] = {}
+        for project in projects:
+            users = self._request(
+                "GET", "user/assignable/search",
+                params={"query": query, "project": project,
+                        "maxResults": str(max_results)},
+                context=f"assignable user search: {query} in {project}",
+            )
+            for u in users:
+                found.setdefault(u.get("accountId") or u.get("name"), u)
+        return list(found.values())[:max_results]
 
     def get_user(self, username: str) -> dict[str, Any]:
         """
