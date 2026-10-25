@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import requests
+from llm_tool_common.config import parse_env_file, resolve_env_file
 
 from .config import MalooConfig
 from .errors import ErrorCode, NotFoundError, ToolError
@@ -64,28 +65,70 @@ def _cache_path() -> Path:
     return Path(base) / "maloo-tool" / "script-names.json"
 
 
-def resolve_patchset_commit(
-    review_id: int, patch: int | None = None
-) -> str | None:
-    """Resolve a Gerrit change/patchset to its git commit hash.
+def _gerrit_auth() -> tuple[str, str] | None:
+    """The Gerrit login the gerrit CLI uses, or None if there is none.
 
-    Uses Gerrit's public REST API directly (no auth needed for reads
-    on whamcloud's Gerrit).  ``patch`` may be a specific patchset
-    number; ``None`` resolves to the change's current (latest)
-    patchset.  Returns None if the lookup fails.
+    The process environment wins over gerrit-cli's .env file, as it does
+    for the gerrit CLI.  Only the default credential set is read.
     """
-    revision = str(patch) if patch is not None else "current"
-    url = f"{GERRIT_URL}/changes/{review_id}/revisions/{revision}/commit"
-    try:
-        resp = requests.get(url, timeout=15)
-        if resp.status_code != 200:
+    user = os.environ.get("GERRIT_USER")
+    password = os.environ.get("GERRIT_PASS")
+    if not (user and password):
+        try:
+            path = resolve_env_file("gerrit-cli")
+            if path is not None:
+                defaults, _ = parse_env_file(path)
+                user = user or defaults.get("GERRIT_USER")
+                password = password or defaults.get("GERRIT_PASS")
+        except Exception:
             return None
-        text = resp.text
-        if text.startswith(")]}'"):
-            text = text[4:]
-        return json.loads(text).get("commit")
-    except Exception:
-        return None
+    if user and password:
+        return user, password
+    return None
+
+
+class GerritLookupError(Exception):
+    """A Gerrit change could not be resolved; the message says why."""
+
+
+def get_patchset_revisions(review_id: int) -> tuple[dict[int, str], int]:
+    """Map every patchset of a Gerrit change to its revision SHA.
+
+    One request with ALL_REVISIONS answers the current patchset, a
+    chosen one and all of them.  A project that is not public returns
+    404 to an anonymous read, so the request is authenticated with the
+    gerrit CLI's login when one is configured.
+
+    Returns the map and the current patchset number.  Raises
+    GerritLookupError with the reason when the lookup fails.
+    """
+    auth = _gerrit_auth()
+    url = f"{GERRIT_URL}{'/a' if auth else ''}/changes/{review_id}"
+    try:
+        resp = requests.get(
+            url, params={"o": "ALL_REVISIONS"}, auth=auth, timeout=15
+        )
+    except requests.RequestException as exc:
+        raise GerritLookupError(f"Gerrit request failed: {exc}") from exc
+    if resp.status_code != 200:
+        hint = "" if auth else (
+            "; no Gerrit login is configured, and private changes need one"
+        )
+        raise GerritLookupError(
+            f"Gerrit returned HTTP {resp.status_code}{hint}"
+        )
+    text = resp.text
+    if text.startswith(")]}'"):
+        text = text[4:]
+    try:
+        change = json.loads(text)
+        revisions = {
+            rev["_number"]: sha for sha, rev in change["revisions"].items()
+        }
+        current = change["revisions"][change["current_revision"]]["_number"]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise GerritLookupError("Gerrit returned no revisions") from exc
+    return revisions, current
 
 
 class MalooClient:
