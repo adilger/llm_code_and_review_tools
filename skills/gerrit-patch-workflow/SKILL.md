@@ -247,9 +247,11 @@ files: rank their directory with `--path`.
 These are enforced by the tree's `commit-msg` hook, and a patch that
 violates them cannot be pushed:
 
-- Subject `LU-nnnnn component: short description`, under 64 columns. Use
+- Subject `LU-nnnnn component: short description`, 62 columns at most. Use
   `LU-0000` when no ticket has been given.
-- Body wrapped to 60 columns. ASCII only: no em dashes, no curly
+- Body wrapped at 70 columns at most (the commit-msg hook's limits are
+  62 and 70; an older message amended may fail them on lines you did not
+  touch). ASCII only: no em dashes, no curly
   quotes. Reviewers also object to `--` used as a dash, so use none:
   a comma, a colon, parentheses or a new sentence instead.
 - The signoff section must be contiguous: no blank lines between
