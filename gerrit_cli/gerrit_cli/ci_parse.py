@@ -80,6 +80,17 @@ def is_bot(account: dict | None) -> bool:
     return (account.get("username") or "") in BOT_USERNAMES
 
 
+# Agents that work through a Gerrit account of their own (Patch Watcher's
+# Patrickbot).  Not CI: their messages are real replies, so is_bot leaves
+# them alone; but they are no person, so a reviewer count leaves them out.
+AGENT_USERNAMES = {"patrickbot"}
+
+
+def is_bot_participant(account: dict | None) -> bool:
+    """A bot or an agent account: not a person, for counting reviewers."""
+    return is_bot(account) or (account or {}).get("username") in AGENT_USERNAMES
+
+
 def is_review_bot(account: dict | None) -> bool:
     if not account:
         return False

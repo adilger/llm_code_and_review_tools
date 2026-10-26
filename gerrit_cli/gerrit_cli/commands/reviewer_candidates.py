@@ -12,7 +12,7 @@ import sys
 import unicodedata
 from collections import Counter
 
-from ..ci_parse import is_bot
+from ..ci_parse import is_bot_participant
 from ..errors import ErrorCode, ExitCode
 from ._helpers import _cli, error_code_for, output_error, output_success
 from .reviewers import commit_author
@@ -105,7 +105,7 @@ def git_history(repo, ref, paths, months):
 
 
 def _bot(name, email):
-    return is_bot({"name": name, "username": (email or "").split("@")[0]})
+    return is_bot_participant({"name": name, "username": (email or "").split("@")[0]})
 
 
 def rank_candidates(commits, exclude=(), on_change=None):

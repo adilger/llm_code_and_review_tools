@@ -3,7 +3,7 @@
 import re
 import sys
 
-from ..ci_parse import is_bot
+from ..ci_parse import is_bot_participant
 from ..errors import ErrorCode, ExitCode
 from ._helpers import _cli, error_code_for, output_error, output_success
 
@@ -219,8 +219,8 @@ def cmd_reviewers(args):
         for r in reviewers:
             reviewer_info = dict(_person(r), approvals=r.get("approvals", {}))
             # Tag, name or username: aireview and the RISC-V builder are
-            # bots without the SERVICE_USER tag.
-            reviewer_info["is_bot"] = is_bot(r)
+            # bots without the SERVICE_USER tag, and Patrickbot is an agent.
+            reviewer_info["is_bot"] = is_bot_participant(r)
             if change is not None:
                 account = r.get("_account_id")
                 added_at, added_by = joined.get(account, (None, None))
@@ -475,7 +475,7 @@ def cmd_find_user(args):
                 "account_id": m.get("_account_id"),
                 # Same bot list as 'reviewers' and 'reviewer-candidates':
                 # aireview and the RISC-V builder lack Gerrit's tag.
-                "is_bot": is_bot(m),
+                "is_bot": is_bot_participant(m),
             })
 
         data = {

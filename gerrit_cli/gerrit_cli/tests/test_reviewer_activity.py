@@ -272,11 +272,12 @@ def test_reviewers_mark_owner_commit_author_and_bots(monkeypatch, capsys):
     assert by_name["aireview"]["service_user"] is False
     assert by_name["aireview"]["is_bot"] is True
     assert {r["account_id"] for r in data["reviewers"] if r["is_bot"]} == {
-        7, 22, 23}
+        7, 20, 22, 23}
     assert by_name["adilger"]["is_bot"] is False
-    # patrickbot, Andreas and Patrick: the bot owner is not tagged or
-    # named as a bot, so it counts; aireview and the builders do not.
-    assert data["human_participant_count"] == 3
+    # Andreas and Patrick.  Patrickbot owns the change but is an agent,
+    # not a person: counting it made 63315 look full at 5 with 4 people.
+    assert by_name["patrickbot"]["is_bot"] is True
+    assert data["human_participant_count"] == 2
 
 
 def test_reviewers_is_bot_follows_the_service_user_tag(monkeypatch, capsys):
@@ -315,3 +316,14 @@ def test_find_user_marks_bots(monkeypatch, capsys):
     assert users["aireview"]["is_bot"] is True
     assert users["lustre-riscv-builder"]["is_bot"] is True
     assert users["adilger"]["is_bot"] is False
+
+
+def test_agent_accounts_are_participants_not_ci():
+    """Patrickbot is no person for a reviewer count, but its messages are
+    real replies, so is_bot (CI noise) still leaves it alone."""
+    from gerrit_cli.ci_parse import is_bot, is_bot_participant
+    bot = {"name": "Patrick Farrell Bot", "username": "patrickbot"}
+    assert is_bot_participant(bot) is True
+    assert is_bot(bot) is False
+    assert is_bot_participant({"name": "Patrick Farrell",
+                               "username": "pfarrell"}) is False
