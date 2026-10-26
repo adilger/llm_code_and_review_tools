@@ -526,7 +526,7 @@ def get_tool_description() -> ToolDescription:
                     Argument(name="--limit", description="Max results", type="integer", default=10),
                 ],
                 examples=['gc find-user "farrell"', 'gc find-user "john" --limit 5'],
-                output_fields=["users[].username", "users[].name", "users[].email"],
+                output_fields=["users[].username", "users[].name", "users[].email", "users[].account_id", "users[].is_bot"],
                 next_actions=["add-reviewer"],
             ),
             # --- Help ---

@@ -289,3 +289,29 @@ def test_reviewers_is_bot_follows_the_service_user_tag(monkeypatch, capsys):
     # No commit in the change detail: no author to name.
     assert data["commit_author"] is None
     assert not any(r["commit_author"] for r in data["reviewers"])
+
+
+def test_find_user_marks_bots(monkeypatch, capsys):
+    """find-user says which matches are bots, by the same list as reviewers."""
+    from gerrit_cli.commands.reviewers import cmd_find_user
+
+    class SuggestClient:
+        def suggest_accounts(self, query, limit=10):
+            return [
+                {"_account_id": 7, "name": "Gerrit AI review for Lustre",
+                 "username": "aireview"},
+                {"_account_id": 23, "name": "Lustre RISC-V Builder",
+                 "username": "lustre-riscv-builder"},
+                {"_account_id": 3, "name": "Andreas Dilger",
+                 "username": "adilger", "email": "adilger@example.com"},
+            ]
+
+    monkeypatch.setattr(cli, "GerritCommentsClient", lambda *a, **k: SuggestClient())
+    with pytest.raises(SystemExit) as done:
+        cmd_find_user(SimpleNamespace(query="a", limit=10, pretty=False))
+    assert done.value.code == 0
+    out = json.loads(capsys.readouterr().out)
+    users = {u["username"]: u for u in out.get("data", out)["users"]}
+    assert users["aireview"]["is_bot"] is True
+    assert users["lustre-riscv-builder"]["is_bot"] is True
+    assert users["adilger"]["is_bot"] is False

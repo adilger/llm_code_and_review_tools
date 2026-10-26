@@ -473,6 +473,9 @@ def cmd_find_user(args):
                 "email": m.get("email", ""),
                 "username": m.get("username", ""),
                 "account_id": m.get("_account_id"),
+                # Same bot list as 'reviewers' and 'reviewer-candidates':
+                # aireview and the RISC-V builder lack Gerrit's tag.
+                "is_bot": is_bot(m),
             })
 
         data = {

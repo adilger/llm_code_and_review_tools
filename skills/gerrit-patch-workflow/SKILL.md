@@ -215,7 +215,7 @@ gc reviewer-candidates <url> --repo <tree> --ref upstream/master
 ```
 
 `add-reviewer` and `find-user` do fuzzy name matching -- confirm the match
-before adding someone to a change.
+before adding someone to a change. `find-user` marks bot accounts `is_bot`.
 
 `reviewers` lists everyone on the change, CCs included: tell them apart by
 `role` (`REVIEWER` or `CC`), and skip `is_bot` accounts (`service_user`

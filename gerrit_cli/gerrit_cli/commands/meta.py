@@ -684,7 +684,8 @@ if either returns nothing, fall back to message:.
         "summary": "Search for users by name",
         "description": """
 Search for Gerrit users by name, email, or username. Useful for finding
-the exact username before adding as a reviewer.
+the exact username before adding as a reviewer. is_bot marks the bot
+accounts, by the same list as 'reviewers' (Gerrit leaves some untagged).
 """,
         "examples": [
             {
