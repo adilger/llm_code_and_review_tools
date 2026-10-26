@@ -131,6 +131,18 @@ class TestFilterThreadsByFields:
         assert result[0] == {"updated": "2025-01-01", "last_updated": "2025-01-02"}
         assert result[1] == {"updated": "2025-01-03", "last_updated": "2025-01-03"}
 
+    def test_filter_with_id(self, sample_threads):
+        """The root comment id is what reply and batch take; it does not shift."""
+        result = filter_threads_by_fields(sample_threads, "index,id")
+        assert result == [{"index": 0, "id": "c1"}, {"index": 1, "id": "c3"}]
+
+    def test_timeline_carries_comment_ids(self, sample_threads):
+        from gerrit_cli.commands._helpers import comment_timeline
+
+        timeline = comment_timeline(sample_threads)
+        assert [(e["id"], e["thread"]) for e in timeline] == [
+            ("c1", 0), ("c2", 0), ("c3", 1)]
+
     def test_timeline_lists_every_comment_oldest_first(self, sample_threads):
         from gerrit_cli.commands._helpers import comment_timeline
 

@@ -80,6 +80,7 @@ def filter_threads_by_fields(
 
     Available fields:
         index - Thread index (0-based)
+        id - Root comment id, which reply/batch take and which does not shift
         file - File path
         line - Line number
         message - Root comment message
@@ -104,6 +105,8 @@ def filter_threads_by_fields(
         for field in field_list:
             if field == "index":
                 thread_data["index"] = idx
+            elif field == "id":
+                thread_data["id"] = root.id
             elif field == "file":
                 thread_data["file"] = root.file_path
             elif field == "line":
@@ -161,6 +164,9 @@ def comment_timeline(threads: list, since: str = "") -> list[dict]:
                 "file": root.file_path,
                 "line": root.line,
                 "thread": index,
+                # 'gc reply' and 'gc batch' take this id, which unlike
+                # the thread index does not shift as threads resolve.
+                "id": comment.id,
                 "reply": comment is not root,
                 "thread_resolved": thread.is_resolved,
                 "message": comment.message,

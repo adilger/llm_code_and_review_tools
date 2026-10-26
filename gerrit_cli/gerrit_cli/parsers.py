@@ -85,7 +85,7 @@ def add_extract_parser(subparsers):
         type=str,
         default=None,
         help="Comma-separated fields to include per thread. "
-             "Available: index,file,line,message,author,resolved,patch_set,code_context. "
+             "Available: index,id,file,line,message,author,resolved,patch_set,code_context. "
              "Example: --fields=index,file,message",
     )
     parser.add_argument(
@@ -359,7 +359,7 @@ def add_series_comments_parser(subparsers):
         type=str,
         default=None,
         help="Comma-separated fields to include per thread. "
-             "Available: index,file,line,message,author,resolved,patch_set,code_context. "
+             "Available: index,id,file,line,message,author,resolved,patch_set,code_context. "
              "Example: --fields=index,file,message",
     )
     parser.add_argument(

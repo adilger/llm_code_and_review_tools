@@ -33,7 +33,7 @@ number.
 gc comments <url>                 # unresolved threads, with code context
 gc comments 64086 --all           # include resolved
 gc series-comments <url>          # every patch in the series at once
-gc comments 64086 --fields=index,file,message
+gc comments 64086 --fields=index,id,file,message
 gc comments 64086 --all --timeline --since '2026-10-01 17:00'
                                   # who said what when, oldest first, replies too:
                                   # "was my comment answered?"
@@ -70,7 +70,10 @@ An index is looked up afresh each time in the unresolved listing, so once
 a reply resolves thread 0, every later index shifts down by one and a
 second `gc reply 1` lands on what `gc comments` showed as 2. For more than
 one reply, address threads by `root_comment.id` (each thread's `index` and
-`root_comment.id` are in `gc comments`), or use `gc batch` below.
+`root_comment.id` are in `gc comments`; `--fields=index,id` gives both, and
+each `--timeline` entry has its comment `id`). To answer several threads,
+prefer one `gc batch` with `comment_id` entries (below) over a run of
+`gc reply` calls.
 
 For several replies at once, stage them, look at them, then push:
 
