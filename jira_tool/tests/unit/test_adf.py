@@ -127,8 +127,11 @@ class TestReplies:
     def test_cli_reply_to_reply_uses_thread_root(self, monkeypatch):
         monkeypatch.setenv("JIRA_SERVER", "https://example.atlassian.net")
         monkeypatch.setenv("JIRA_TOKEN", "t")
-        monkeypatch.setenv("JIRA_EMAIL", "a@example.com")
-        monkeypatch.setenv("JIRA_AUTH_TYPE", "basic")
+        # Set both, as the user's .env can: JIRA_CLOUD_EMAIL makes the
+        # login basic auth, which probes /myself first unless cloud_id
+        # is "site", and the probe would be calls[0].
+        monkeypatch.setenv("JIRA_CLOUD_EMAIL", "a@example.com")
+        monkeypatch.setenv("JIRA_CLOUD_ID", "site")
         responses.add(responses.GET, f"{CLOUD}/issue/TLC-1/comment/12",
                       json={"id": "12", "parentId": 10}, status=200)
         responses.add(responses.POST, f"{CLOUD}/issue/TLC-1/comment",
