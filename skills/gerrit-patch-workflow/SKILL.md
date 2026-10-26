@@ -43,6 +43,9 @@ gc comments 64086 --messages --include-ci
 gc comments 64086 --all --include-system
                                   # every change-level message, each vote with its
                                   # reviewer and patchset, uploads and CI too
+gc comments 64086 --all --include-ci --since '2026-10-01 17:00'
+                                  # what happened since then: threads with a comment
+                                  # at or after it (same index) and newer messages
 ```
 
 Read **all** the feedback, human and bot. Bots -- `aireview` in particular

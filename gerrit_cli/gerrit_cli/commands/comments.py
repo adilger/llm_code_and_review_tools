@@ -94,6 +94,18 @@ def cmd_extract(args):
                 )
         else:
             data = result.to_dict()
+            if since:
+                # Threads keep the index they have in the full listing,
+                # which is what reply/done/ack/stage take.
+                active = {id(t) for t in threads_since(result.threads, since)}
+                data["threads"] = [
+                    entry for entry, thread in zip(data["threads"], result.threads)
+                    if id(thread) in active
+                ]
+                data["review_messages"] = [
+                    m for m in data["review_messages"] if m.get("date", "") >= since
+                ]
+                data["since"] = since
             if summary_lines is not None:
                 data = truncate_extracted_comments(data, summary_lines)
 

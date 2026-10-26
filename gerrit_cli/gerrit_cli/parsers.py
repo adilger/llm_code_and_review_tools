@@ -130,8 +130,9 @@ def add_extract_parser(subparsers):
         metavar="TIME",
         default=None,
         help="Only comments (with --timeline), change messages (with --messages) "
-             "or threads (otherwise, with --fields) with something said at or "
-             "after TIME, UTC as Gerrit gives it, e.g. 2026-10-01 or "
+             "or threads with something said at or after TIME (otherwise; the "
+             "default listing also drops older review_messages, and threads "
+             "keep their index), UTC as Gerrit gives it, e.g. 2026-10-01 or "
              "'2026-10-01 17:30'",
     )
     return parser

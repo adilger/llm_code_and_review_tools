@@ -502,6 +502,62 @@ class TestCmdExtract:
         with pytest.raises(SystemExit):
             build_parser().parse_args(["comments", "1", "--messages", "--timeline"])
 
+    def test_since_filters_the_default_listing(self, capsys):
+        """--since without --fields/--timeline/--messages narrows the default
+        listing: threads with a comment at or after it, keeping their index,
+        and review_messages dated at or after it."""
+        import json
+
+        from gerrit_cli.cli import build_parser, cmd_extract
+        from gerrit_cli.extractor import CommentExtractor
+
+        def inline(cid, updated, msg, in_reply_to=None):
+            c = {"id": cid, "author": {"name": "Reviewer"}, "line": 5,
+                 "updated": updated, "message": msg, "unresolved": True,
+                 "patch_set": 2}
+            if in_reply_to:
+                c["in_reply_to"] = in_reply_to
+            return c
+
+        client = MagicMock()
+        client.get_change_detail.return_value = {
+            "current_revision": "abc",
+            "revisions": {"abc": {"_number": 2}},
+        }
+        client.get_comments.return_value = {"a.c": [
+            inline("old", "2026-09-01 10:00:00.000000000", "old thread"),
+            inline("mid", "2026-09-02 10:00:00.000000000", "answered later"),
+            inline("rep", "2026-10-02 08:00:00.000000000", "reply", "mid"),
+        ]}
+        client.get_messages.return_value = [
+            {"id": "m1", "author": {"name": "Andreas Dilger"},
+             "date": "2026-09-01 09:00:00.000000000",
+             "message": "Patch Set 1:\n\nold", "_revision_number": 1},
+            {"id": "m2", "author": {"name": "Andreas Dilger"},
+             "date": "2026-10-02 09:00:00.000000000",
+             "message": "Patch Set 2:\n\nnew", "_revision_number": 2},
+        ]
+        client.format_change_url.return_value = "https://example.com/12345"
+
+        def extract(**kwargs):
+            kwargs.pop("url")
+            return CommentExtractor(client).extract_from_change(12345, **kwargs)
+
+        args = build_parser().parse_args(
+            ["comments", "12345", "--all", "--no-context",
+             "--since", "2026-10-01"])
+        with patch('gerrit_cli.cli.extract_comments', side_effect=extract), \
+             patch('gerrit_cli.commands.comments.LastURLManager'), \
+             pytest.raises(SystemExit) as exc_info:
+            cmd_extract(args)
+        assert exc_info.value.code == 0
+        data = json.loads(capsys.readouterr().out)
+        assert [t["root_comment"]["id"] for t in data["threads"]] == ["mid"]
+        assert data["threads"][0]["index"] == 1
+        assert [m["message"] for m in data["review_messages"]] == [
+            "Patch Set 2:\n\nnew"]
+        assert data["since"] == "2026-10-01"
+
 
 class TestCmdWorkOnPatch:
     """Tests for cmd_work_on_patch function."""
