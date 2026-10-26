@@ -30,7 +30,7 @@ SUMMARY_FILE = "summary.json"
 # Bump when the snapshot layout changes: a persisted snapshot from
 # another code version must be discarded, not rendered (missing keys
 # 500 the page until the next successful refresh).
-SNAPSHOT_LAYOUT = 22
+SNAPSHOT_LAYOUT = 23
 
 
 def _code_fingerprint(directory: Path | None = None) -> str:

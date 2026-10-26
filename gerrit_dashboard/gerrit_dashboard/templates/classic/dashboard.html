@@ -377,6 +377,7 @@
 {%- endmacro %}
 
 {% macro badges(r) -%}
+  {% for b in r.blockers if b.kind in ("rebase", "bot-vote", "verified", "review") %}<span class="chip bad" title="{{ b.reason }}">{{ b.label }}</span>{% endfor %}
   {% if r.janitor_alert %}<span class="chip bad" title="janitor: test failures unique to this patch — expand for details">{% if r.signals.unique_tests %}{{ r.signals.unique_tests|length }} {% endif %}unique failure{{ 's' if r.signals.unique_tests|length != 1 }}</span>{% endif %}
   {% if r.topic %}<span class="chip run" title="topic: {{ r.topic }}">{{ r.topic }}</span>{% endif %}
   {% for h in r.hashtags %}<span class="chip tag" title="hashtag">{{ h }}</span>{% endfor %}

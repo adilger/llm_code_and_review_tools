@@ -57,7 +57,8 @@ gerrit-dashboard snapshot --cached -o out.html       # re-render without fetchin
   why-line each. Signals older than a week collapse into "longstanding" so
   fresh problems stay visible. P0: build failed, enforced tests failed,
   needs rebase (checkpatch "cannot be cherry-picked"), janitor "failures
-  unique to this patch". P1: unresolved review threads where the last word
+  unique to this patch", a Code-Review -1 from any bot (with the bot's
+  reason). P1: unresolved review threads where the last word
   isn't yours, a human -1 on your patch, a new patchset that wiped out your
   -1 on someone else's.
 - **Watchlist** — a local list (add a change number or URL, plus a note)
@@ -80,6 +81,13 @@ non-owner votes against the review threshold: votes add up and a -1 is no
 veto (three +1s and a -1 make +2); only a -2 or the owner's own -1 (not
 ready yet) blocks, shown as `R ✗`. Gerrit's attention set is deliberately ignored — it only
 works if everyone maintains it.
+
+Whatever stops a change landing is shown on every row, not only on your
+own patches: a red chip for a needed rebase, a bot's Code-Review -1, a
+Verified veto or a blocking review vote (build and test failures are the
+`B`/`T` slots). On a change you review, are CC'd on or watch, it reads
+"blocked on the owner: …", and a review request on such a change says
+what has to happen first.
 
 ## Configuration (environment, all optional)
 

@@ -98,6 +98,8 @@ def build_record(change: dict, bundle: dict, config: Config) -> dict:
         "test": tests,
         "gate": ci_parse.verified_gate(change, config.verified_override_emails),
         "verified_neg": ci_parse.verified_negatives(change),
+        "bot_neg": _bot_review_negatives(change),
+        "blockers": [],   # filled by classify_record for open changes
         "review": {
             "humans": humans,
             "plus1": rs["plus_one_count"],
@@ -132,6 +134,79 @@ def build_record(change: dict, bundle: dict, config: Config) -> dict:
         "commit_msg": (rev.get("commit") or {}).get("message", ""),
         "items": [],  # attention items, filled by classify_record
     }
+
+
+def _bot_review_negatives(change: dict) -> list[dict]:
+    """Code-Review votes below zero cast by bots, with the first line of
+    the bot's latest message as the reason (the human ones are in
+    review.humans)."""
+    out = []
+    for e in ((change.get("labels") or {}).get("Code-Review") or {}).get("all") or []:
+        v = e.get("value")
+        if not isinstance(v, int) or v >= 0 or not ci_parse.is_bot(e):
+            continue
+        note = ""
+        for m in reversed(change.get("messages") or []):
+            if (m.get("author") or {}).get("_account_id") != e.get("_account_id"):
+                continue
+            for line in (m.get("message") or "").splitlines()[1:]:
+                line = line.strip()
+                if line and not (line.startswith("(") and line.endswith(")")):
+                    note = line[:120]
+                    break
+            break
+        out.append({"name": (e.get("name") or "").strip(), "value": v,
+                    "date": e.get("date", ""), "note": note})
+    return out
+
+
+def _blockers(rec: dict) -> list[dict]:
+    """Everything that stops the change landing, whoever owns it.
+
+    Each entry is {kind, label, reason, when}: label is the short chip
+    text, reason the sentence for the detail line.  A -1 from a reviewer
+    only blocks while the review total is not met (a -2 or the owner's own
+    -1 always does); the janitor's -1 follows janitor_alert, so a
+    self-healed run does not count.
+    """
+    out = []
+    if rec["signals"]["needs_rebase"]:
+        out.append({"kind": "rebase", "label": "needs rebase",
+                    "reason": "needs rebase — checkpatch: cannot be cherry-picked",
+                    "when": rec["signals"]["needs_rebase_when"]})
+    for v in rec["bot_neg"]:
+        if v["name"] == ci_parse.CHECKPATCH_BOT and rec["signals"]["needs_rebase"]:
+            continue
+        if v["name"] == ci_parse.JANITOR_BOT:
+            continue
+        out.append({"kind": "bot-vote", "label": f"{v['name']} {v['value']:+d}",
+                    "reason": f"{v['name']} voted {v['value']:+d}"
+                              + (f": {v['note']}" if v["note"] else ""),
+                    "when": v["date"]})
+    if rec["janitor_alert"]:
+        out.append({"kind": "janitor", "label": "unique failure",
+                    "reason": "janitor: test failures unique to this patch",
+                    "when": rec["signals"]["unique_failure_when"]})
+    if rec["build"]["state"] in ("FAILURE", "ABORTED"):
+        out.append({"kind": "build", "label": f"build {rec['build']['state'].lower()}",
+                    "reason": f"build {rec['build']['state'].lower()}",
+                    "when": rec["build"]["when"]})
+    if rec["test"]["state"] == "FAIL" and not rec["test"]["all_failures_retesting"]:
+        out.append({"kind": "tests", "label": "tests failed",
+                    "reason": "enforced tests failed", "when": rec["test"]["when"]})
+    if (rec["gate"] == "FAIL" and rec["build"]["state"] not in ("FAILURE", "ABORTED")
+            and rec["test"]["state"] != "FAIL"):
+        for v in rec["verified_neg"]:
+            out.append({"kind": "verified", "label": f"Verified {v['value']:+d}",
+                        "reason": f"Verified {v['value']:+d} by {v['name']}",
+                        "when": v.get("date", "")})
+    if not rec["review"]["pass"]:
+        for v in rec["review"]["humans"]:
+            if v["value"] < 0 and (v["value"] <= -2 or v.get("account_id") == rec["owner_id"]):
+                out.append({"kind": "review", "label": f"CR {v['value']:+d}",
+                            "reason": f"{v['name']} voted {v['value']:+d}",
+                            "when": v.get("date", "")})
+    return out
 
 
 def _size_bucket(total: int) -> str:
@@ -202,6 +277,8 @@ def classify_record(rec: dict, roles: set[str], config: Config) -> None:
                  f"you replied, thread not resolved yet",
                  when=newest.get("updated", ""))
 
+    rec["blockers"] = _blockers(rec) if rec["status"] == "NEW" else []
+
     # My own -1 on a change I own or carry is "parked by me", not attention.
     my_neg_on_own = responsible and rec["review"]["my_vote"] < 0
 
@@ -216,6 +293,9 @@ def classify_record(rec: dict, roles: set[str], config: Config) -> None:
             if rec["signals"]["needs_rebase"]:
                 _add(rec, 0, "needs-rebase", "needs rebase — checkpatch: cannot be cherry-picked",
                      when=rec["signals"]["needs_rebase_when"])
+            for blk in rec["blockers"]:
+                if blk["kind"] == "bot-vote":
+                    _add(rec, 0, "bot-veto", blk["reason"], when=blk["when"])
             if rec["build"]["state"] in ("FAILURE", "ABORTED"):
                 num = rec["build"]["number"]
                 _add(rec, 0, "build-failed",
@@ -317,6 +397,11 @@ def classify_record(rec: dict, roles: set[str], config: Config) -> None:
             if th.get("their_turn"):
                 _add(rec, 3, "waiting", f"{th['their_turn']} thread(s) waiting on others")
 
+    if not responsible and rec["blockers"]:
+        _add(rec, 3, "blocked",
+             "blocked on the owner: " + "; ".join(x["reason"] for x in rec["blockers"]),
+             when=max(x["when"] for x in rec["blockers"]))
+
     if is_reviewer and not rec["wip"]:
         if rec["review"]["my_vote"] != 0:
             _add(rec, 4, "reviewed", f"you voted {rec['review']['my_vote']:+d} on current PS")
@@ -329,7 +414,9 @@ def classify_record(rec: dict, roles: set[str], config: Config) -> None:
                      + (" — your objection was dropped" if prior["value"] < 0 else ""),
                      when=rec["ps_created"])
             elif rec["gate"] == "OK":
-                _add(rec, 2, "review-requested", "CI green — awaiting your review")
+                _add(rec, 2, "review-requested", "CI green — awaiting your review"
+                     + (" (" + ", ".join(x["label"] for x in rec["blockers"]) + " first)"
+                        if rec["blockers"] else ""))
             else:
                 _add(rec, 3, "review-later", "awaiting review (CI not green yet)")
 
@@ -379,7 +466,8 @@ def _assign_group(rec: dict, roles: set[str]) -> None:
     if responsible:
         if "parked" in rules:
             rec["group"] = "parked"
-        elif p0_rules & {"needs-rebase", "build-failed", "unique-failure", "test-failed", "verified-veto"}:
+        elif p0_rules & {"needs-rebase", "build-failed", "unique-failure", "test-failed",
+                         "verified-veto", "bot-veto"}:
             rec["group"] = "failed"
         elif "ready" in rules or (rec["queued"] and rec["status"] == "NEW"):
             rec["group"] = "landing"
