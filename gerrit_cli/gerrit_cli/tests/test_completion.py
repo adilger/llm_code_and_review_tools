@@ -47,7 +47,8 @@ def test_script_matches_the_parsers():
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 @pytest.mark.parametrize("line, offered", [
     ("gerrit end", []),
-    ("gerrit rev", ["review", "review-series", "reviewers"]),
+    ("gerrit rev", ["review", "review-series", "reviewer-candidates",
+                     "reviewers"]),
     ("gerrit --user bot fini", ["finish-patch"]),
     ("gc review-series 1 --no-c", ["--no-checkout"]),
     ("gerrit staged r", ["refresh", "remove"]),

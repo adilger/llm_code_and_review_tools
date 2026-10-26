@@ -141,7 +141,10 @@ owner sets this variable; agents must not set, unset, or override it.
   push` is different: it posts staged comment replies.) See
   `gerrit_cli/README.md` ("Uploading a Patchset").
 - **Reviewers:** `gc reviewers <url>`, `gc add-reviewer <url> <name>`,
-  `gc remove-reviewer <url> <name>`, `gc find-user <name>`
+  `gc remove-reviewer <url> <name>`, `gc find-user <name>`,
+  `gc reviewer-candidates <url> --repo <lustre-release> --ref upstream/master`
+  (ranks who reviewed, by Reviewed-by trailers, and wrote the change's
+  files over the last 12 months of local git history)
 
 **Configuration:** environment variables, or a `.env` file.
 Variables already set in the environment always win. Only one file

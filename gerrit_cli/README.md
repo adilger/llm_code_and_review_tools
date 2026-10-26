@@ -521,6 +521,25 @@ add-reviewer <URL> "Name"        # Add a reviewer to a change
 remove-reviewer <URL> "Name"     # Remove a reviewer from a change
 reviewers <URL>                  # Reviewers and CCs: role, votes, last activity
 find-user "name"                 # Search Gerrit users (fuzzy match)
+reviewer-candidates <URL>        # Rank who reviewed/wrote the change's files
+                                 # (local git history; --repo, --ref, --months,
+                                 # --path, --brief; see below)
+```
+
+#### Finding reviewer candidates
+
+`reviewer-candidates` reads the files a change touches from Gerrit
+(anonymous reads work) and, in a local lustre-release checkout, counts
+each person's `Reviewed-by:` trailers and authored commits on those files
+over the window (12 months by default), merges the same person under
+other emails or spellings, and ranks them (`score` = 2 x reviewed +
+authored). The owner, the commit author and bots are left out (listed
+under `excluded`); people already on the change are kept and marked
+`on_change`. `review_share` near 1 marks whoever lands every commit.
+
+```bash
+gc reviewer-candidates 69833 --repo ~/lustre-release --ref upstream/master
+gc reviewer-candidates --path lustre/llite/file.c --months 24 --brief
 ```
 
 ### Change Management

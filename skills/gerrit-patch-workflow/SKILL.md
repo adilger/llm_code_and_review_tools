@@ -208,6 +208,7 @@ gc rebase <url>                      gc checkout <url>
 gc abandon <url>                     gc restore <url>
 gc reviewers <url>                   gc add-reviewer <url> <name>
 gc find-user <name>                  gc remove-reviewer <url> <name>
+gc reviewer-candidates <url> --repo <tree> --ref upstream/master
 ```
 
 `add-reviewer` and `find-user` do fuzzy name matching -- confirm the match
@@ -226,6 +227,17 @@ their latest message or inline comment, with date, patchset and text.
 People taken off the change are under `removed`. To judge whether a
 reviewer has gone quiet, read those fields rather than parsing `info` and
 `comments --all`; `gc explain reviewers` defines each one.
+
+To find new reviewers, do not tally `git log` by hand:
+`gc reviewer-candidates <url> --repo <lustre-release checkout> --ref
+upstream/master` ranks who reviewed (Reviewed-by trailers, counted double)
+and who wrote the touched files over the last 12 months, leaves out the
+owner, the commit author and bots, and marks who is already on the change
+(`on_change`). Fetch the ref first so the history is current. The ranking
+is evidence, not the choice: weigh MAINTAINERS, recency (`last_reviewed`)
+and the five-person cap; a `review_share` near 1 is the gatekeeper who
+lands everything, not a file expert. `paths_without_history` lists new
+files: rank their directory with `--path`.
 
 ## Lustre commit-message rules
 

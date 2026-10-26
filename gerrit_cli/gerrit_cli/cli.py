@@ -145,6 +145,7 @@ from .commands import review as _cmd_review
 from .commands import ci as _cmd_ci
 from .commands import change as _cmd_change
 from .commands import reviewers as _cmd_reviewers
+from .commands import reviewer_candidates as _cmd_reviewer_candidates
 from .commands import meta as _cmd_meta
 from .commands import reintegration as _cmd_reintegration
 from .commands import upload as _cmd_upload
@@ -202,6 +203,7 @@ cmd_reviewers = _cmd_reviewers.cmd_reviewers
 cmd_add_reviewer = _cmd_reviewers.cmd_add_reviewer
 cmd_remove_reviewer = _cmd_reviewers.cmd_remove_reviewer
 cmd_find_user = _cmd_reviewers.cmd_find_user
+cmd_reviewer_candidates = _cmd_reviewer_candidates.cmd_reviewer_candidates
 
 cmd_search = _cmd_meta.cmd_search
 cmd_explain = _cmd_meta.cmd_explain
@@ -431,6 +433,7 @@ def build_handlers():
         'add_reviewer': cmd_add_reviewer,
         'remove_reviewer': cmd_remove_reviewer,
         'find_user': cmd_find_user,
+        'reviewer_candidates': cmd_reviewer_candidates,
         'abandon': cmd_abandon,
         'checkout': cmd_checkout,
         'maloo': cmd_maloo,

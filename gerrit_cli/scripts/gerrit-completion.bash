@@ -10,7 +10,7 @@ _gerrit_completions() {
     _init_completion || return
 
     local global_opts="--envelope --help --user --version -U -h"
-    local commands="abandon abort ack add-reviewer batch check checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch publish-drafts push rebase related remove-reviewer reply restore review review-series reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
+    local commands="abandon abort ack add-reviewer batch check checkout co comments continue-reintegration describe diff done examples explain extract find-user finish-patch graph hashtag i info interactive label maloo message next-patch publish-drafts push rebase related remove-reviewer reply restore review review-series reviewer-candidates reviewers s sashiko-review search series-comments series-info series-status set-topic skip-reintegration sr stage staged status upload vote watch work-on-patch"
 
     # The command is the first word that is not a global option.
     local cmd="" i=1
@@ -74,6 +74,7 @@ _gerrit_completions() {
         restore) opts="--envelope --help --message --pretty --user -U -h -m -p" ;;
         review) opts="--base --changes-only --dry-run --envelope --full-content --full-context --help --message --post-comments --prefix --pretty --summary --tag --unified --user --vote -U -b -c -f -h -m -n -p -s -u" ;;
         review-series) opts="--checkout --envelope --help --include-abandoned --no-checkout --no-prompt --numbers-only --pretty --urls-only --user -U -a -c -h -n -p -u" ;;
+        reviewer-candidates) opts="--brief --envelope --exclude --help --limit --months --path --pretty --ref --repo --user -C -U -h -n -p" ;;
         reviewers) opts="--envelope --help --pretty --user -U -h -p" ;;
         s|search) opts="--all --envelope --help --limit --max --pretty --start --user -S -U -a -h -n -p" ;;
         sashiko-review|sr) opts="--dry-run --envelope --help --repo --sashiko-url --timeout --user --vote -U -h" ;;

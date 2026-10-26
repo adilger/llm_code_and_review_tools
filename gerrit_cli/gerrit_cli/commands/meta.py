@@ -589,6 +589,55 @@ original fields (account_id, name, email, username, approvals) appear.
         ],
         "related": ["add-reviewer", "remove-reviewer"],
     },
+    "reviewer-candidates": {
+        "summary": "Rank reviewer candidates from the files' git history",
+        "description": """
+Who reviewed and who wrote the files a change touches, from a local
+lustre-release checkout: per file, each person's Reviewed-by trailers and
+authored commits (merges left out) over the window, default 12 months by
+commit date. The change's files come from Gerrit (anonymous reads work);
+--path gives files or directories instead, with or without a change.
+History is read from --ref (default HEAD) in --repo (default the current
+directory): use upstream/master when HEAD is an old or unrelated branch.
+
+One person under two emails or two spellings of a name is merged, by
+email and then by name (case, accents and punctuation ignored); aliases
+lists what was merged. score is 2 x reviewed + authored (a commit counts
+once however many of the files it touches); ties go to more files, then
+the more recent. reviewed and authored count commits; last_reviewed and
+last_authored are commit dates; files gives per-file counts, or bare
+paths with --brief.
+review_share is reviewed over commits_examined: near 1 means the person
+is on almost every commit, as the gatekeeper who lands them is (Oleg
+Drokin on lustre-release), so that count says little about these files.
+
+The change's owner and its commit author are left out, and so are bots
+(the same list as gerrit reviewers' is_bot) and anyone named with
+--exclude; excluded lists them with a reason. People already on the
+change stay in the ranking with on_change REVIEWER or CC (null if not
+on it). Anonymous reads hide emails, so that match is by name.
+
+paths_without_history names files with no commit in the window (new
+files, or a repo that is not lustre-release): widen --months, or rank the
+directory with --path. Picking who to add is still yours: check
+MAINTAINERS and whether a candidate is active.
+""",
+        "examples": [
+            {
+                "command": "gc reviewer-candidates 12345 --repo ~/lustre-release --ref upstream/master",
+                "description": "Rank candidates for a change's files",
+            },
+            {
+                "command": "gc reviewer-candidates --path lustre/llite/file.c --months 24",
+                "description": "Rank for one file over two years, no change",
+            },
+            {
+                "command": "gc reviewer-candidates 12345 --brief --limit 5",
+                "description": "Top five, files as bare paths",
+            },
+        ],
+        "related": ["reviewers", "add-reviewer", "find-user"],
+    },
     "search": {
         "summary": "Search for changes with Gerrit's query syntax",
         "description": """

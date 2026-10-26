@@ -799,6 +799,44 @@ def add_reviewers_parser(subparsers):
     return parser
 
 
+def add_reviewer_candidates_parser(subparsers):
+    """Add the 'reviewer-candidates' subcommand parser."""
+    parser = subparsers.add_parser(
+        "reviewer-candidates",
+        help="Rank who reviewed and wrote a change's files lately (git history)",
+        description="For each file a change touches, count each person's "
+                    "Reviewed-by trailers and authored commits over the "
+                    "window in a local lustre-release checkout, merge "
+                    "identities, and rank (score = 2 x reviewed + authored). "
+                    "Leaves out the owner, the commit author and bots; "
+                    "marks people already on the change (on_change). "
+                    "'gc explain reviewer-candidates' describes each field.",
+    )
+    parser.add_argument("url", nargs="?", default=None,
+                        help="Gerrit change URL, number or Change-Id "
+                             "(optional with --path)")
+    parser.add_argument("--path", dest="paths", action="append", metavar="PATH",
+                        help="A file or directory to rank for, instead of "
+                             "the change's files (repeatable)")
+    parser.add_argument("--repo", "-C", default=".",
+                        help="lustre-release checkout whose history to read "
+                             "(default: the current directory)")
+    parser.add_argument("--ref", default="HEAD",
+                        help="History to read, e.g. upstream/master "
+                             "(default: HEAD)")
+    parser.add_argument("--months", type=int, default=12,
+                        help="Window in months (default: 12)")
+    parser.add_argument("--limit", "-n", type=int, default=10,
+                        help="Candidates to list, 0 for all (default: 10)")
+    parser.add_argument("--exclude", action="append", metavar="NAME_OR_EMAIL",
+                        help="Leave this person out too (repeatable)")
+    parser.add_argument("--brief", action="store_true",
+                        help="Files as bare paths, without per-file counts")
+    parser.add_argument("--pretty", "-p", action="store_true",
+                        help="Pretty-print JSON output")
+    return parser
+
+
 def add_add_reviewer_parser(subparsers):
     """Add the 'add-reviewer' subcommand parser."""
     parser = subparsers.add_parser(
@@ -1653,6 +1691,8 @@ def setup_parsers(subparsers, handlers):
     add_remove_reviewer_parser(subparsers).set_defaults(
         func=handlers['remove_reviewer'])
     add_find_user_parser(subparsers).set_defaults(func=handlers['find_user'])
+    add_reviewer_candidates_parser(subparsers).set_defaults(
+        func=handlers['reviewer_candidates'])
     add_abandon_parser(subparsers).set_defaults(func=handlers['abandon'])
     add_checkout_parser(subparsers).set_defaults(func=handlers['checkout'])
 
