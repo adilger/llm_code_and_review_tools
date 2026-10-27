@@ -59,6 +59,9 @@ class TestBuildCmd:
         assert path == tmp_path / ".cursor" / "cli.json"
         assert json.loads(path.read_text()) == {
             "permissions": {"allow": ["Shell(git:log *)"], "deny": []}}
+        write_cursor_permissions(tmp_path, ["Shell(*)"], ("Shell(curl:*)",))
+        assert json.loads(path.read_text())["permissions"] == {
+            "allow": ["Shell(*)"], "deny": ["Shell(curl:*)"]}
 
     def test_cursor_prompt_on_stdin_and_resume(self):
         cmd = get_agent("cursor").build_cmd(

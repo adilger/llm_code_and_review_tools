@@ -350,6 +350,8 @@ class BatchConfig:
     # expand_allowed_tools), each in its agent's syntax. Empty:
     # --dangerously-skip-permissions (claude) or --force (cursor).
     allowed_tools: list[str] = field(default_factory=list)
+    # cursor only: deny rules for the same file (lreview bench offline)
+    denied_tools: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # git -C <repo> resolves relative paths against the repo, not
@@ -1071,7 +1073,8 @@ def _run_review(config, change, worktree_dir, log_path, session,
         log_path = run_log_path(config, change)
     if config.agent == "cursor" and config.allowed_tools:
         write_cursor_permissions(
-            worktree_dir, expand_allowed_tools(config, worktree_dir))
+            worktree_dir, expand_allowed_tools(config, worktree_dir),
+            config.denied_tools)
     cmd = build_agent_cmd(config, change, session, worktree_dir)
     extra_env = {**get_agent(config.agent).env(config.lean), **config.env}
     stdin_path = None

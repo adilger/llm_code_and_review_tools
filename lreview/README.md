@@ -361,7 +361,11 @@ lreview bench report --judge DIR...                  # LLM-judged matching
   (`--offline`, the default): `curl`, `wget`, `gerrit` and `jira` fail as
   if the network were down, because a merged change's Gerrit related
   changes and its JIRA ticket can show the later fix. The agent's own
-  connection to its model is untouched.
+  connection to its model is untouched. Cursor's shell rebuilds `PATH`
+  and so skips the stub commands, and its web tools run under
+  `--force`. So a cursor review runs offline without `--force`, with
+  the rules `Shell(*)` allowed and `Shell(curl:*)` and the others
+  denied. Cursor rejects the web tools because no rule allows them.
 - An arm is a directory under `<bench-dir>` (default
   `lreview-results/bench/`), one `rep<N>` per repetition, with
   `bench-run.json` recording the lreview, agent and prompts versions

@@ -818,6 +818,10 @@ def cmd_bench(args) -> int:
         print(f"error: {exc}")
         return 1
 
+    allow, deny = ([], [])
+    if args.offline and args.agent == "cursor":
+        allow, deny = bench.offline_rules()
+
     def config_for(results_dir: Path, repo: Path) -> BatchConfig:
         return BatchConfig(
             repo=repo, results_dir=results_dir,
@@ -829,6 +833,7 @@ def cmd_bench(args) -> int:
             memory_db=(label_dir / "db") if args.memory else None,
             resume=args.resume, lean=args.lean, preload=args.preload,
             env=bench.offline_env(bench_dir) if args.offline else {},
+            allowed_tools=allow, denied_tools=deny,
             agent_args=args.agent_arg or [])
     try:
         bench.run_bench(config_for, cases, label_dir, args.reps, repos,

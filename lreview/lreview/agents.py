@@ -258,18 +258,20 @@ class AgentSpec:
         raise ValueError(f"unknown agent {self.name}")
 
 
-def write_cursor_permissions(worktree: Path, rules: list[str]) -> Path:
+def write_cursor_permissions(worktree: Path, rules: list[str],
+                             deny: tuple = ()) -> Path:
     """Write the cursor allowlist where the agent reads it.
 
     Cursor reads .cursor/cli.json in its workspace, beside the user's
     ~/.cursor/cli-config.json. Only Shell, WebFetch and Mcp rules
     gate a tool: the file tools run without an allow rule, and only a
-    deny rule (in the user's config) stops them.
+    deny rule stops them. A deny rule wins over every allow rule.
     """
     path = worktree / ".cursor" / "cli.json"
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(
-        {"permissions": {"allow": rules, "deny": []}}, indent=2) + "\n")
+        {"permissions": {"allow": rules, "deny": list(deny)}},
+        indent=2) + "\n")
     return path
 
 
