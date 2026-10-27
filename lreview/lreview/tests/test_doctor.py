@@ -187,6 +187,14 @@ class TestAgentLogin:
         assert not ok
         assert detail.startswith("claude is not logged in: Not logged in")
 
+    def test_claude_rejected_token_is_not_logged_in(self):
+        out = ('{"is_error": true, "result": "Failed to authenticate. '
+               'API Error: 401 Invalid authentication credentials"}')
+        with self._run(1, out):
+            ok, detail = check_agent_login("claude", live=True)
+        assert not ok
+        assert detail.startswith("claude is not logged in: Failed to authenticate")
+
     def test_claude_other_failure_is_not_called_a_login(self):
         with self._run(1, '{"is_error": true, "result": "Overloaded"}'):
             ok, detail = check_agent_login("claude", live=True)

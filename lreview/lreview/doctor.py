@@ -72,7 +72,7 @@ LOGIN_PROMPT = "Reply with the single word ok."
 # What claude and codex say when the account is not logged in or the
 # credential is refused.
 _AUTH_FAILURES = ("not logged in", "/login", "authentication_failed",
-                  "invalid api key", "oauth token")
+                  "failed to authenticate", "invalid api key", "oauth token")
 
 
 def check_agent_login(agent: str, live: bool = False) -> Tuple[bool, str]:
