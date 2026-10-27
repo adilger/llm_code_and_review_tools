@@ -229,6 +229,11 @@ class TestParser:
         args = build_parser().parse_args(["check"])
         assert args.func.__name__ == "cmd_check"
 
+    def test_agents_parses(self):
+        args = build_parser().parse_args(["agents", "--no-login"])
+        assert args.func.__name__ == "cmd_agents"
+        assert args.no_login is True
+
     def test_command_required(self):
         with pytest.raises(SystemExit):
             build_parser().parse_args([])

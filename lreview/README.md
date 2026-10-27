@@ -680,6 +680,8 @@ lreview render [file.json...]    # (re)generate Markdown reports from
 lreview chat <change|url>        # interactive session over an existing
                                  # review (findings, how the patch works)
 lreview models                   # models and efforts each agent accepts
+lreview agents                   # which agent backends are installed and
+                                 # logged in (--no-login: PATH only)
 lreview stats [LOG|DIR...]       # where reviews spent their time and money
 lreview bench list|run|report    # the standard benchmark set
 lreview post [<change|url>...] [options]

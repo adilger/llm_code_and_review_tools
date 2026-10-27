@@ -234,3 +234,28 @@ class TestCmdCheck:
         rc, probe = self._check(["check", "--no-login"], (False, "x"))
         assert rc == 0
         probe.assert_not_called()
+
+
+class TestListAgents:
+
+    def test_states(self):
+        from lreview.doctor import list_agents
+        found = {"claude": "/bin/claude", "agent": "/bin/agent"}
+        logins = {"claude": (True, "logged in"),
+                  "cursor": (False, "cursor is not logged in")}
+        with patch("lreview.doctor.shutil.which", side_effect=found.get), \
+                patch("lreview.doctor.check_agent_login",
+                      side_effect=logins.get):
+            rows = {r[0]: r for r in list_agents()}
+        assert rows["claude"][2] == "ready"
+        assert rows["cursor"][2] == "not logged in"
+        assert rows["codex"][2] == "not installed"
+        assert rows["gemini"][1] is False
+
+    def test_no_login(self):
+        from lreview.doctor import list_agents
+        with patch("lreview.doctor.shutil.which", return_value="/bin/x"), \
+                patch("lreview.doctor.check_agent_login") as login:
+            rows = list_agents(login=False)
+        login.assert_not_called()
+        assert {r[2] for r in rows} == {"installed"}

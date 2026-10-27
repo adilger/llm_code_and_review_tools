@@ -123,8 +123,9 @@ Reviews run on Sonnet by default; on the benchmark it found as many
 known bugs as Opus at under half the cost and time.
 
 Before you spend another round on the same backend, get a second
-opinion from a different backend. Use the first one in this list that
-`lreview check --agent <name>` reports as installed and logged in:
+opinion from a different backend. Run `lreview agents`. It shows
+which backends are installed and logged in. Use the first one in this
+list that it reports as `ready`:
 
 1. `codex`. On the benchmark it found the most known bugs. Some of
    them, both Claude models missed.
@@ -134,8 +135,7 @@ opinion from a different backend. Use the first one in this list that
    other backend is ready.
 
 ```bash
-lreview check --agent codex      # then, if it is not ready:
-lreview check --agent cursor
+lreview agents                   # which backends are ready
 lreview run --repo <tree> --last 2 --agent codex -o /tmp/lreview-2nd.txt
 lreview run --repo <tree> --last 2 --agent cursor -o /tmp/lreview-2nd.txt
 ```
@@ -153,7 +153,7 @@ first backend do not find. Different backends fail in different ways.
 
 Inside a Patch Watcher run, use lreview for reviews. Do not start
 `claude`, `codex` or `agent` yourself. A Claude run has no `codex`,
-so `lreview check` decides which second opinion is ready.
+so `lreview agents` decides which second opinion is ready.
 Results go to `$LREVIEW_RESULTS_DIR`, which the run sets to its own
 tmp.
 

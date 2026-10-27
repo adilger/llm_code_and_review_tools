@@ -908,6 +908,17 @@ def cmd_models(args) -> int:
     return 0
 
 
+def cmd_agents(args) -> int:
+    """Print each backend and whether it can run a review now."""
+    from .doctor import list_agents
+    rows = list_agents(login=not args.no_login)
+    for name, verified, state, detail in rows:
+        tag = "" if verified else " (unverified)"
+        print(f"{name + tag:<22} {state:<14} {detail}")
+    ready = ("ready", "installed")
+    return 0 if any(row[2] in ready for row in rows) else 2
+
+
 def cmd_render(args) -> int:
     from .markdown import render_existing
     results_dir = Path(args.results_dir).expanduser().resolve()
@@ -1421,6 +1432,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=sorted(AGENTS), default=None,
         help="Show just this agent (default: claude and codex)")
     models_p.set_defaults(func=cmd_models)
+
+    agents_p = sub.add_parser(
+        "agents", help="List the agent backends and which are "
+                       "installed and logged in")
+    agents_p.add_argument(
+        "--no-login", action="store_true",
+        help="skip the login checks (for claude, one prompt to haiku)")
+    agents_p.set_defaults(func=cmd_agents)
 
     render_p = sub.add_parser(
         "render", help="Render existing review JSONs to Markdown reports")
