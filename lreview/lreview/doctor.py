@@ -34,6 +34,9 @@ AGENT_INSTALL = {
     "auggie": (
         "npm install -g @augmentcode/auggie\n"
         "  then run 'auggie login'"),
+    "cursor": (
+        "curl https://cursor.com/install -fsS | bash\n"
+        "  then run 'agent login'"),
 }
 
 
@@ -77,8 +80,9 @@ def check_agent_login(agent: str) -> Tuple[bool, str]:
 
     Being on PATH says nothing about the login: a review then fails
     authentication before producing anything. Claude is asked one turn
-    on haiku with no tools, about 1.5 cents; codex has "login status",
-    which spends nothing. The other backends are not checked.
+    on haiku with no tools, about 1.5 cents; codex has "login status"
+    and cursor "agent status", which spend nothing. The other
+    backends are not checked.
     """
     import json
     import subprocess
@@ -89,6 +93,8 @@ def check_agent_login(agent: str) -> Tuple[bool, str]:
                "--no-session-persistence"]
     elif agent == "codex":
         cmd = ["codex", "login", "status"]
+    elif agent == "cursor":
+        cmd = ["agent", "status"]
     else:
         return True, "login not checked for this backend"
     env = os.environ.copy()
@@ -150,11 +156,11 @@ def run_setup(agent: str, prompts_dir: Optional[str]) -> int:
     print()
 
     # 1. Agent CLI
-    agent_cli = shutil.which(agent)
+    agent_cli = shutil.which(spec.binary)
     if agent_cli:
         _step(True, "agent CLI", agent_cli)
     else:
-        _step(False, "agent CLI", f"'{agent}' not found on PATH")
+        _step(False, "agent CLI", f"'{spec.binary}' not found on PATH")
         print("  install it with:")
         for line in AGENT_INSTALL[agent].splitlines():
             print(f"  {line}")

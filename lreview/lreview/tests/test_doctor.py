@@ -143,6 +143,13 @@ class TestAgentLogin:
         assert "Not logged in" in detail
         assert run.call_args[0][0] == ["codex", "login", "status"]
 
+    def test_cursor_uses_agent_status(self):
+        with self._run(0, "Logged in as someone@example.com") as run:
+            ok, detail = check_agent_login("cursor")
+        assert ok
+        assert "Logged in" in detail
+        assert run.call_args[0][0] == ["agent", "status"]
+
     def test_other_backends_are_not_checked(self):
         with patch("subprocess.run") as run:
             ok, _ = check_agent_login("gemini")

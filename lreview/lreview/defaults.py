@@ -33,6 +33,11 @@ CODEX_DEFAULT_MODEL = "gpt-6.1-sol"
 # under half the cost and time (2026-10-09). --model opus for the rest.
 CLAUDE_DEFAULT_MODEL = "sonnet"
 
+# A model only Cursor offers; the claude and codex models it also
+# runs are better reached through their own CLIs. Not yet measured
+# with lreview bench against the other Cursor models.
+CURSOR_DEFAULT_MODEL = "composer-2.5"
+
 # Directory names used when no path option or variable says otherwise.
 DEFAULT_RESULTS_DIRNAME = "lreview-results"
 DEFAULT_WORKTREES_DIRNAME = "worktrees"

@@ -22,7 +22,8 @@ Shared utilities live in `llm_tool_common/`.
 
 `lreview` reviews Gerrit changes with AI and posts the findings as
 inline review comments. Each change is reviewed by a headless agent
-process — Claude Code by default; codex, gemini, and opencode are also
+process — Claude Code by default; codex, auggie, cursor, gemini, and
+opencode are also
 supported (`--agent`; currently only claude is verified as working,
 the others are best-effort) — running the
 [review-prompts](https://github.com/verygreen/review-prompts/)

@@ -58,7 +58,7 @@ class TestParser:
         args = build_parser().parse_args(["run", "1", "--agent", "gemini"])
         assert args.agent == "gemini"
         with pytest.raises(SystemExit):
-            build_parser().parse_args(["run", "1", "--agent", "cursor"])
+            build_parser().parse_args(["run", "1", "--agent", "windsurf"])
 
     def test_effort_flag_and_env(self, monkeypatch):
         monkeypatch.setenv("LREVIEW_EFFORT", "high")
@@ -77,6 +77,7 @@ class TestParser:
         assert resolve_model("claude") == "sonnet"
         assert resolve_model("codex") == "gpt-6.1-sol"
         assert resolve_model("gemini") is None
+        assert resolve_model("cursor") == "composer-2.5"
         assert resolve_model("claude", "fable") == "fable"
         monkeypatch.setenv("LREVIEW_MODEL", "opus")
         assert resolve_model("claude") == "opus"

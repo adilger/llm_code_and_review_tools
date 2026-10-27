@@ -35,7 +35,7 @@ exact instructions for anything missing:
 
 1. **An agent CLI** on PATH — `claude` (Claude Code, the default;
    `npm install -g @anthropic-ai/claude-code`, then log in), or
-   `codex` / `auggie` / `gemini` / `opencode` for other AIs (see Agents below).
+   `codex` / `auggie` / `agent` (Cursor) / `gemini` / `opencode` for other AIs (see Agents below).
 2. **The review prompts** — bundled with this repository as the
    [review-prompts](https://github.com/verygreen/review-prompts/)
    submodule, which `./install.sh` initializes automatically (or
@@ -66,7 +66,7 @@ silent offline). `LREVIEW_PROMPTS_UPDATE=off` disables the check,
 ## Agents
 
 > **Disclaimer:** **claude** and **codex** are verified end-to-end.
-> auggie, gemini and opencode are best-effort integrations — expect
+> auggie, cursor, gemini and opencode are best-effort integrations — expect
 > to tweak invocation flags (`--agent-arg`) and please report what
 > works.
 
@@ -83,7 +83,7 @@ analysis of the top commit
 ("deep dive regression analysis" is deliberate — per the
 review-prompts README it gets better prompt compliance than calling
 it a review.) Select the backend with
-`--agent {claude,codex,gemini,opencode,auggie}` or `LREVIEW_AGENT`:
+`--agent {claude,codex,gemini,opencode,auggie,cursor}` or `LREVIEW_AGENT`:
 
 - **claude** (default) — run with stream-json output, which is what
   powers the live token counter, final token/cost figures, and model
@@ -100,6 +100,25 @@ it a review.) Select the backend with
   Reasoning uses `--reasoning-effort`. Credits are not converted to dollars;
   Auggie may omit token counts. The adapter is tested with a fake worker;
   a live account review has not yet been verified.
+- **cursor (Cursor Agent)** — runs Cursor's `agent` CLI as
+  `agent -p --output-format stream-json --trust --force`, or with
+  `--allow-tool` rules, `--sandbox disabled` in place of `--force`
+  (see the table below). `--trust` is required: each review runs in a new
+  worktree, and an untrusted workspace ends a headless run at once.
+  Install with `curl https://cursor.com/install -fsS | bash`, then run
+  `agent login`. The default model is `composer-2.5`, a model only
+  Cursor offers; `lreview models --agent cursor` lists the others
+  (`agent --list-models`). The default is not yet chosen by
+  `lreview bench`. The effort is part of the model slug
+  (`gpt-5.3-codex-high`), so `--effort` is ignored. `--preload` sends
+  the protocol and the commit on stdin, as for codex. A review that
+  ends without `review-metadata.json` is asked for it once with
+  `--resume`, which continues the chat (Cursor cannot fork it, so
+  `-m` does not resume an earlier review). The final result event
+  gives the token total and `lreview stats` the tool calls; Cursor
+  reports no dollar cost, so cost stays blank. A live light review
+  has run; a full review on a Gerrit change has not yet been
+  verified.
 - **gemini / opencode** — best-effort backends via `gemini --yolo -p`
   or `opencode run`. Reviews, logs, collection, and posting all work,
   but there is no token/cost/model reporting and the invocations have
@@ -251,9 +270,10 @@ writes (most of it thinking). Two defaults keep both down:
   otherwise puts some 40K tokens in front of every call, and a 1-hour
   cache write costs 2x input against 1.25x; calls in a review are
   seconds apart.
-- **`--preload`** (default on, claude full mode): the protocol
-  (`review-core.md`) and the files it always loads go into the system
-  prompt, the same for every review so concurrent reviews share its
+- **`--preload`** (default on, claude full mode; codex and cursor get
+  the same text at the start of the first message, on stdin): the
+  protocol (`review-core.md`) and the files it always loads go into
+  the system prompt, the same for every review so concurrent reviews share its
   cache, and the commit goes into the first message. The agent no
   longer spends its first calls reading them one at a time, and no
   longer skips any.
@@ -378,8 +398,8 @@ lreview bench report --judge DIR...                  # LLM-judged matching
    and `./review-metadata.json` (severity score) for **every completed
    analysis** — the metadata file is the completion marker, so a run
    that produced neither is recorded as `failed`, not silently clean.
-   A claude review that exits cleanly with neither file is resumed
-   once and asked for the metadata (its own
+   A claude or cursor review that exits cleanly with neither file is
+   resumed once and asked for the metadata (its own
    `kreview-*.metadata-nudge.jsonl` log); only if that fails too is it
    `failed`. A failed run's error carries the agent's own last error,
    such as a provider classifier refusing the turn.
@@ -690,10 +710,10 @@ needed: chat defaults to the repository recorded in the manifest at
 review time.
 
 Like `run`, chat picks its backend with `--agent
-{claude,codex,gemini,opencode,auggie}` or `$LREVIEW_AGENT` (default claude —
+{claude,codex,gemini,opencode,auggie,cursor}` or `$LREVIEW_AGENT` (default claude —
 the verified one; the others are best-effort). The interactive
 invocations are taken from each CLI's official docs: claude and
-codex take the seed prompt as a bare positional argument, as does auggie; gemini
+codex take the seed prompt as a bare positional argument, as do auggie and cursor; gemini
 needs `-i/--prompt-interactive` (`-p` and, on older releases, a bare
 positional are one-shot), and opencode takes `--prompt` (its root
 positional is a project *path*). All are auto-submitted as the first
@@ -720,17 +740,17 @@ opencode's `--model` wants the `provider/model` form.
 | `--results-dir DIR` | `$LREVIEW_RESULTS_DIR`, else `lreview-results/` in the llm tools checkout (cwd-relative without a checkout) | Logs, JSONs, summary.json |
 | `--worktrees-dir DIR` | auto | Where worktrees are created |
 | `--keep-worktrees` | off | Keep worktrees after review |
-| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex (verified), auggie, gemini, opencode |
-| `--model NAME` | `sonnet` for claude, `gpt-6.1-sol` for codex (or `$LREVIEW_MODEL`); auggie/gemini/opencode use their own default | Model for the review runs; see `lreview models` or `auggie models list --json` |
-| `--effort LEVEL` | agent's default (or `$LREVIEW_EFFORT`) | Reasoning effort: low/medium/high/xhigh/max, plus `ultra` on the codex models that have it — claude (`--effort`), codex (`-c model_reasoning_effort=...`) or auggie (`--reasoning-effort`); ignored for gemini/opencode. Known model ladders are checked before the run; Auggie validates its own model/effort support |
+| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex (verified), auggie, cursor, gemini, opencode |
+| `--model NAME` | `sonnet` for claude, `gpt-6.1-sol` for codex (or `$LREVIEW_MODEL`); `composer-2.5` for cursor; auggie/gemini/opencode use their own default | Model for the review runs; see `lreview models`, `auggie models list --json` or `agent --list-models` |
+| `--effort LEVEL` | agent's default (or `$LREVIEW_EFFORT`) | Reasoning effort: low/medium/high/xhigh/max, plus `ultra` on the codex models that have it — claude (`--effort`), codex (`-c model_reasoning_effort=...`) or auggie (`--reasoning-effort`); ignored for gemini/opencode/cursor (a cursor model slug carries its effort). Known model ladders are checked before the run; Auggie validates its own model/effort support |
 | `--memory, -m` | off | Read/update the per-change review memory document |
 | `--clear-memory, -c` | off | With `-m`: delete the change's memory document first |
 | `--no-resume` | off | With `-m` (claude): start a fresh session from the memory document instead of resuming the recorded review conversation |
 | `--db DIR` | `$LREVIEW_DB`, else `<repo>/lreview-db` | Memory database directory |
 | `--lean` / `--no-lean` | on (`$LREVIEW_LEAN=0` for off) | claude: minimal tools, no MCP/skills/CLAUDE.md, 5-minute prompt cache; codex: unused features off (see "Cost, speed and telemetry") |
-| `--preload` / `--no-preload` | on (`$LREVIEW_PRELOAD=0` for off) | full mode: the protocol and its always-loaded files up front (claude: system prompt; codex: start of the prompt), the commit in the first message |
+| `--preload` / `--no-preload` | on (`$LREVIEW_PRELOAD=0` for off) | full mode: the protocol and its always-loaded files up front (claude: system prompt; codex and cursor: start of the prompt), the commit in the first message |
 | `--agent-arg=ARG` | — | Extra agent-CLI arg (repeatable; `--claude-arg` is a legacy alias) |
-| `--allow-tool=RULE` | — | Claude only. A permission rule, for example `Bash(git log *)` (repeatable). With one or more rules, the review runs with `--permission-mode dontAsk` and only these tools, in place of `--dangerously-skip-permissions`. `{worktree}` and `{prompts}` expand to absolute paths, so `Edit(/{worktree}/**)` lets the agent write only in its worktree. Add a deny rule with `--agent-arg=--disallowedTools --agent-arg=RULE` |
+| `--allow-tool=RULE` | — | claude or cursor. A permission rule in that agent's syntax, for example `Bash(git log *)` or `Shell(git:log *)` (repeatable). With one or more rules, a claude review runs with `--permission-mode dontAsk` and only these tools, in place of `--dangerously-skip-permissions`. `{worktree}` and `{prompts}` expand to absolute paths, so `Edit(/{worktree}/**)` lets the agent write only in its worktree. Add a deny rule with `--agent-arg=--disallowedTools --agent-arg=RULE`. A cursor review gets the rules in its worktree's `.cursor/cli.json` and runs without `--force`, so Cursor rejects a shell command that no rule allows. Cursor's file tools are not gated: they run with no allow rule, and only a deny rule in `~/.cursor/cli-config.json` stops them. The sandbox stays off, because in the sandbox Cursor runs every shell command whatever the rules say. Rules in `~/.cursor/cli-config.json` also apply |
 | `--post` | off | Post findings when batch finishes |
 | `--prefix TEXT` | `[AI review - <model>]` | Message prefix; `<model>` placeholder substituted (`$LREVIEW_PREFIX` overrides the default; `''` for none) |
 | `--prompts-dir DIR` | auto | review-prompts location (repo root or its `kernel/`); default: `$REVIEW_PROMPTS_DIR`, the bundled submodule, a legacy kreview.md install, or `~/review-prompts` |

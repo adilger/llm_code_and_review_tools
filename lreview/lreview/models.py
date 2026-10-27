@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .defaults import (  # noqa: F401 (re-exported)
-    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL)
+    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL, CURSOR_DEFAULT_MODEL)
 
 # The union of every backend's effort ladder; individual agents and
 # models accept subsets (see CLAUDE_EFFORTS and CodexModel.efforts).
@@ -118,6 +118,7 @@ CLAUDE_MODELS = ("sonnet", "opus", "fable", "haiku")
 DEFAULT_MODELS = {
     "claude": CLAUDE_DEFAULT_MODEL,
     "codex": CODEX_DEFAULT_MODEL,
+    "cursor": CURSOR_DEFAULT_MODEL,
 }
 
 
@@ -202,3 +203,28 @@ def codex_catalog_lines() -> list:
             f"  {'':<{width}}  effort: {', '.join(model.efforts)} "
             f"(model default: {model.default_effort})")
     return lines
+
+
+def cursor_model_lines() -> list:
+    """Cursor's models for this account, from `agent --list-models`.
+
+    The effort is part of the slug (gpt-5.3-codex-high), so the list
+    is also the effort ladder.
+    """
+    import subprocess
+    lines = [f"  {CURSOR_DEFAULT_MODEL} (default); the effort is part of "
+             "the model name, --effort is not used"]
+    try:
+        done = subprocess.run(["agent", "--list-models"],
+                              capture_output=True, text=True, timeout=30,
+                              stdin=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return lines + [f"  (could not run 'agent --list-models': {exc})"]
+    models = [line.strip() for line in done.stdout.splitlines()
+              if " - " in line]
+    if done.returncode != 0 or not models:
+        said = " ".join((done.stdout + done.stderr).split())[:200]
+        return lines + [f"  ('agent --list-models' failed: {said})"]
+    # Cursor's own default is not lreview's
+    return lines + ["  " + line.replace("(default)", "(Cursor's default)")
+                    for line in models]

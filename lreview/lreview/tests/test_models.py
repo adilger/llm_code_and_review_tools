@@ -124,3 +124,19 @@ class TestModelEfforts:
 
     def test_other_agents_have_no_ladder(self):
         assert model_efforts("gemini", "gemini-3-pro") is None
+
+
+def test_cursor_model_lines(monkeypatch):
+    import subprocess
+    from lreview.models import cursor_model_lines
+    listing = ("Available models\n\nauto - Auto (default)\n"
+               "composer-2.5 - Composer 2.5\n")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
+                        subprocess.CompletedProcess(a, 0, listing, ""))
+    lines = cursor_model_lines()
+    assert "composer-2.5 (default)" in lines[0]
+    assert lines[1:] == ["  auto - Auto (Cursor's default)",
+                         "  composer-2.5 - Composer 2.5"]
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
+                        subprocess.CompletedProcess(a, 1, "", "not logged in"))
+    assert "not logged in" in cursor_model_lines()[-1]

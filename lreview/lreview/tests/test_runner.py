@@ -211,6 +211,12 @@ class TestBuildAgentCmd:
         with pytest.raises(ValueError, match="no worktree"):
             build_agent_cmd(config)
 
+    def test_cursor_allowlist_takes_commas(self, tmp_path):
+        """cursor's rules go in a JSON list, so a comma is fine."""
+        config = _config(tmp_path, tmp_path, agent="cursor",
+                         allowed_tools=["Shell(git:log a,b)"])
+        assert config.allowed_tools == ["Shell(git:log a,b)"]
+
     def test_jobs_must_be_positive(self, tmp_path):
         with pytest.raises(ValueError):
             _config(tmp_path, tmp_path, jobs=0)
@@ -410,6 +416,18 @@ class TestTokenParsing:
         tokens, cost = parse_final_usage(log)
         assert tokens == 1050
         assert cost == 4.2
+
+    def test_parse_final_usage_cursor_camel_case(self, tmp_path):
+        """cursor's result event names usage in camelCase and carries
+        no cost."""
+        from lreview.runner import parse_final_usage
+        log = tmp_path / "x.log"
+        log.write_text(
+            '{"type":"system","subtype":"init","model":"Auto Balance"}\n'
+            '{"type":"result","subtype":"success","is_error":false,'
+            '"usage":{"inputTokens":13168,"outputTokens":489,'
+            '"cacheReadTokens":59136,"cacheWriteTokens":0}}\n')
+        assert parse_final_usage(log) == (72793, None)
 
     def test_parse_final_usage_codex_turn_completed(self, tmp_path):
         """codex reports usage once, at the end of the turn; its
@@ -693,6 +711,41 @@ class TestRunBatch:
         assert nudge[nudge.index("--resume") + 1] == "sess-1"
         assert "review-metadata.json" in nudge[nudge.index("-p") + 1]
         assert list(config.results_dir.glob("*.metadata-nudge.jsonl"))
+
+    def test_cursor_missing_metadata_resumes_the_chat(self, repo, tmp_path,
+                                                      monkeypatch):
+        """cursor continues the chat with --resume; the nudge keeps the
+        review's allowlist, so it runs without --force."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "agent"
+        stub.write_text(STUB_CLAUDE)
+        stub.chmod(0o755)
+        monkeypatch.setenv("PATH",
+                           f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        sha = _commit_with_marker(repo, "LATE_METADATA_MARKER")
+        config = _config(repo, tmp_path, agent="cursor",
+                         allowed_tools=["Shell(git:*)"])
+        result = run_batch(config, [_change(114, sha)])[0]
+        assert result.status == STATUS_CLEAN
+        first, nudge = _invocations(args_log)
+        assert "--resume" not in first and "--force" not in first
+        assert nudge[nudge.index("--resume") + 1] == "sess-1"
+        assert "--force" not in nudge
+        assert "review-metadata.json" in nudge[-1]
+
+    def test_claude_nudge_keeps_the_allowlist(self, repo, tmp_path,
+                                              stub_claude, monkeypatch):
+        args_log = tmp_path / "args.log"
+        monkeypatch.setenv("STUB_ARGS_LOG", str(args_log))
+        sha = _commit_with_marker(repo, "LATE_METADATA_MARKER")
+        config = _config(repo, tmp_path, allowed_tools=["Bash(git *)"])
+        run_batch(config, [_change(115, sha)])
+        _, nudge = _invocations(args_log)
+        assert "--dangerously-skip-permissions" not in nudge
+        assert nudge[nudge.index("--allowedTools") + 1] == "Bash(git *)"
 
     def test_asked_once_and_still_missing_fails(self, repo, tmp_path,
                                                 stub_claude, monkeypatch):
@@ -1466,6 +1519,29 @@ def test_codex_preload_goes_on_stdin(repo, tmp_path, monkeypatch):
     assert result.log_path.with_suffix(".prompt.md").is_file()
 
 
+def test_cursor_preload_goes_on_stdin(repo, tmp_path, monkeypatch):
+    from lreview.runner import PRELOAD_FILES, run_review
+    prompts = tmp_path / "prompts"
+    for name in PRELOAD_FILES:
+        (prompts / name).parent.mkdir(parents=True, exist_ok=True)
+        (prompts / name).write_text(f"contents of {name}\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "agent"
+    stub.write_text("#!/bin/sh\ncat\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    sha = _commit_with_marker(repo, "NEW", "hello\n")
+    _git(repo, "checkout", "-q", sha)
+    config = _config(repo, tmp_path, prompts_dir=prompts, preload=True,
+                     agent="cursor")
+    config.results_dir.mkdir(parents=True)
+    result = run_review(config, _change(1, sha), repo)
+    seen = result.log_path.read_text()
+    assert seen.startswith("# Lustre review protocol")
+    assert seen.index("contents of review-core.md") < seen.index("+hello")
+
+
 CODEX_REFUSAL = "This content was flagged for possible cybersecurity risk."
 
 
@@ -1549,3 +1625,17 @@ def test_stall_point(tmp_path):
         "waiting_on": "model",
         "detail": "no tool call was running; the last event was "
                   "assistant text"}
+
+
+def test_stall_point_cursor_tool_call(tmp_path):
+    from lreview.runner import stall_point
+    log = tmp_path / "kreview.log"
+    started = {"type": "tool_call", "subtype": "started", "call_id": "c1",
+               "tool_call": {"shellToolCall": {"args": {
+                   "command": "make -j8"}}}}
+    log.write_text(json.dumps(started) + "\n")
+    assert stall_point(log) == {"waiting_on": "tool",
+                                "detail": "tool Bash: make -j8"}
+    log.write_text(json.dumps(started) + "\n" + json.dumps(
+        {**started, "subtype": "completed"}) + "\n")
+    assert stall_point(log)["waiting_on"] == "model"

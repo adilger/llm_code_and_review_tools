@@ -25,7 +25,7 @@ from llm_tool_common.update_check import maybe_check_for_updates
 
 from . import __version__
 from .defaults import (
-    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL,
+    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL, CURSOR_DEFAULT_MODEL,
     DEFAULT_AGENT, DEFAULT_BENCH_JOBS, DEFAULT_JOBS, DEFAULT_LEAN,
     DEFAULT_MODE, DEFAULT_PREFIX, DEFAULT_PRELOAD, DEFAULT_RESULTS_DIRNAME,
     DEFAULT_STALL_RETRY, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT,
@@ -112,8 +112,8 @@ def resolve_model(agent: str, model: str = None) -> str:
     Explicit --model wins, then $LREVIEW_MODEL unless another agent's
     catalog lists that name: the variable is shared by every agent,
     and `codex -m opus` only fails. claude defaults to
-    sonnet and codex to gpt-6.1-sol,
-    gemini and opencode to whatever their own CLI defaults to.
+    sonnet, codex to gpt-6.1-sol and cursor to composer-2.5,
+    the others to whatever their own CLI defaults to.
 
     codex aliases are expanded to the slug the CLI expects, so
     `--model sol` runs — and is posted and recorded as —
@@ -412,8 +412,8 @@ def cmd_run(args) -> int:
               "--local ref, or the checked-out HEAD)")
         return 1
 
-    if args.allow_tool and args.agent != "claude":
-        print("error: --allow-tool needs the claude agent")
+    if args.allow_tool and args.agent not in ("claude", "cursor"):
+        print("error: --allow-tool needs the claude or cursor agent")
         return 1
 
     prompts_status = ensure_prompts(args)
@@ -879,7 +879,7 @@ def cmd_chat(args) -> int:
 def cmd_models(args) -> int:
     """Print what each agent will accept for --model and --effort."""
     from .models import (CLAUDE_EFFORTS, CLAUDE_DEFAULT_MODEL, CLAUDE_MODELS,
-                         codex_catalog_lines)
+                         codex_catalog_lines, cursor_model_lines)
     agents = [args.agent] if args.agent else ["claude", "codex"]
     for agent in agents:
         if agent == "claude":
@@ -891,6 +891,9 @@ def cmd_models(args) -> int:
         elif agent == "codex":
             print("codex")
             print("\n".join(codex_catalog_lines()))
+        elif agent == "cursor":
+            print("cursor")
+            print("\n".join(cursor_model_lines()))
         else:
             print(f"{agent}\n  models are the CLI's own; --effort is "
                   "not supported")
@@ -988,11 +991,13 @@ def build_parser() -> argparse.ArgumentParser:
             f"  -j, --jobs N     parallel reviews (default: {DEFAULT_JOBS})\n"
             f"  --mode NAME      full or light (default: {DEFAULT_MODE});\n"
             "                   light is one cheap focused pass\n"
-            f"  --agent NAME     claude, codex, gemini, opencode, auggie\n"
-            f"                   (default: {DEFAULT_AGENT})\n"
+            f"  --agent NAME     claude, codex, gemini, opencode, auggie,\n"
+            f"                   cursor (default: {DEFAULT_AGENT})\n"
             f"  --model NAME     claude: {CLAUDE_DEFAULT_MODEL} (default), opus, fable\n"
             f"                   codex: {CODEX_DEFAULT_MODEL} (default), astra, terra,\n"
             "                   luna, ... — see 'lreview models'\n"
+            f"                   cursor: {CURSOR_DEFAULT_MODEL} (default), ... —\n"
+            "                   see 'lreview models --agent cursor'\n"
             "  --effort LEVEL   low..max, ultra (codex, per model)\n"
             "  --post           post findings when the batch finishes\n"
             "  --prefix TEXT    posted-message prefix; <model> placeholder\n"
@@ -1135,14 +1140,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=sorted(AGENTS), default=default_agent,
         help="Agent to run the reviews with (default: $LREVIEW_AGENT or "
              "claude; claude and codex are the verified backends, "
-             "gemini and opencode are best-effort)")
+             "auggie, cursor, gemini and opencode are best-effort)")
     run_p.add_argument(
         "--model", default=None,
         help="Model for the review runs — claude: sonnet (default), opus, "
              "fable, haiku; codex: gpt-6.1-sol (default), "
              "gpt-6-sol, gpt-6-astra, gpt-5.6-sol/-terra/-luna, gpt-5.5, "
              "gpt-5.3-codex-spark, or their aliases (sol, astra, terra, "
-             "luna, spark). "
+             "luna, spark); cursor: composer-2.5 (default) or any "
+             "'agent --list-models' slug. "
              "$LREVIEW_MODEL sets the default; 'lreview models' "
              "prints the codex table")
     run_p.add_argument(
@@ -1151,7 +1157,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reasoning effort for claude (--effort) or codex "
              "(-c model_reasoning_effort=...); default: "
              "$LREVIEW_EFFORT or the agent's own default. Ignored for "
-             "gemini/opencode. The ladder is per model — 'ultra' is "
+             "gemini/opencode/cursor (cursor model slugs carry the "
+             "effort). The ladder is per model — 'ultra' is "
              "codex-only, and gpt-5.5 / gpt-5.3-codex-spark stop at "
              "xhigh; see 'lreview models'")
     run_p.add_argument(
@@ -1185,8 +1192,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--preload", action=argparse.BooleanOptionalAction,
         default=_env_flag("LREVIEW_PRELOAD", DEFAULT_PRELOAD),
         help="Full mode: give the reviewer the protocol and the files it "
-             "always loads up front (claude: system prompt; codex: start "
-             "of the prompt) and the commit in its first message, instead "
+             "always loads up front (claude: system prompt; codex and "
+             "cursor: start of the prompt, on stdin) and the commit in its first message, instead "
              "of having it read them one call at a time (default: on; "
              "$LREVIEW_PRELOAD=0 turns it off)")
     run_p.add_argument(
@@ -1196,10 +1203,14 @@ def build_parser() -> argparse.ArgumentParser:
              "use --agent-arg=--flag for arguments starting with a dash)")
     run_p.add_argument(
         "--allow-tool", action="append", dest="allow_tool", metavar="RULE",
-        help="Claude agent: a permission rule, for example "
-             "'Bash(git log *)' (repeatable). With one or more rules the "
-             "review runs with --permission-mode dontAsk and only these "
-             "tools, in place of --dangerously-skip-permissions. "
+        help="claude or cursor agent: a permission rule in that "
+             "agent's syntax, for example 'Bash(git log *)' (claude) or "
+             "'Shell(git:log *)' (cursor) (repeatable). With one or more "
+             "rules claude runs with --permission-mode dontAsk and only "
+             "these tools, in place of --dangerously-skip-permissions; "
+             "cursor gets the rules in the worktree's .cursor/cli.json "
+             "and runs without --force, so it rejects a shell command no "
+             "rule allows (its file tools are not gated). "
              "{worktree} and {prompts} expand to the review worktree and "
              "the prompts directory: 'Edit(/{worktree}/**)'")
     run_p.add_argument(
@@ -1379,7 +1390,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reasoning effort for the session — claude "
              "(--effort) or codex (-c model_reasoning_effort=...); "
              "default: $LREVIEW_EFFORT or the agent's own default. "
-             "Ignored for gemini/opencode; see 'lreview models' for "
+             "Ignored for gemini/opencode/cursor; see 'lreview models' for "
              "the per-model ladders")
     chat_p.add_argument(
         "--keep-worktree", action="store_true",

@@ -11,9 +11,11 @@ PROMPT = ("Using the prompt /p/review-core.md run a deep dive "
 class TestRegistry:
 
     def test_supported_agents(self):
-        assert set(AGENTS) == {"claude", "codex", "gemini", "opencode", "auggie"}
-        assert AGENTS["auggie"].stream_json is True
-        assert AGENTS["auggie"].verified is False
+        assert set(AGENTS) == {"claude", "codex", "gemini", "opencode",
+                               "auggie", "cursor"}
+        for name in ("auggie", "cursor"):
+            assert AGENTS[name].stream_json is True
+            assert AGENTS[name].verified is False
         for name in ("claude", "codex"):
             assert AGENTS[name].stream_json is True
             assert AGENTS[name].verified is True
@@ -23,7 +25,7 @@ class TestRegistry:
 
     def test_unknown_agent_raises(self):
         with pytest.raises(ValueError, match="unknown agent"):
-            get_agent("cursor")
+            get_agent("windsurf")
 
 
 class TestBuildCmd:
@@ -34,6 +36,39 @@ class TestBuildCmd:
                        "--log-file", "-", "--log-level", "info",
                        "--permission", "launch-process:allow", "--model", "model-id",
                        "--reasoning-effort", "high", "--extra", PROMPT]
+
+    def test_cursor_stream_json_ignores_effort(self):
+        cmd = get_agent("cursor").build_cmd(
+            "gpt-5.3-codex-high", "high", ["--extra"], PROMPT)
+        assert cmd == ["agent", "-p", "--output-format", "stream-json",
+                       "--trust", "--force",
+                       "--model", "gpt-5.3-codex-high", "--extra", PROMPT]
+
+    def test_cursor_allowlist_drops_force_and_sandbox(self):
+        """In the sandbox, Cursor runs every shell command whatever the
+        rules say, so an allowlist run turns it off."""
+        cmd = get_agent("cursor").build_cmd(
+            None, None, [], PROMPT, allowed_tools=["Shell(git:log *)"])
+        assert cmd == ["agent", "-p", "--output-format", "stream-json",
+                       "--trust", "--sandbox", "disabled", PROMPT]
+
+    def test_write_cursor_permissions(self, tmp_path):
+        import json
+        from lreview.agents import write_cursor_permissions
+        path = write_cursor_permissions(tmp_path, ["Shell(git:log *)"])
+        assert path == tmp_path / ".cursor" / "cli.json"
+        assert json.loads(path.read_text()) == {
+            "permissions": {"allow": ["Shell(git:log *)"], "deny": []}}
+
+    def test_cursor_prompt_on_stdin_and_resume(self):
+        cmd = get_agent("cursor").build_cmd(
+            None, None, [], PROMPT, resume="chat-1", prompt_on_stdin=True)
+        assert cmd[-2:] == ["--resume", "chat-1"]
+        assert PROMPT not in cmd
+
+    def test_cursor_runs_the_agent_binary(self):
+        assert get_agent("cursor").binary == "agent"
+        assert get_agent("claude").binary == "claude"
 
     def test_claude_prompt_and_stream_json(self):
         cmd = get_agent("claude").build_cmd(
@@ -52,7 +87,7 @@ class TestBuildCmd:
                             "--allowedTools", "Read,Bash(git log *)"]
 
     def test_allowlist_needs_claude(self):
-        with pytest.raises(ValueError, match="needs the claude agent"):
+        with pytest.raises(ValueError, match="needs the claude or cursor agent"):
             get_agent("codex").build_cmd(None, None, [], PROMPT,
                                          allowed_tools=["Read"])
 
@@ -149,10 +184,12 @@ class TestBuildInteractiveCmd:
                        "--prompt", PROMPT]
 
     def test_no_bypass_flags_in_interactive_mode(self):
-        for name in ("claude", "codex", "gemini", "opencode", "auggie"):
+        for name in ("claude", "codex", "gemini", "opencode", "auggie",
+                     "cursor"):
             cmd = get_agent(name).build_interactive_cmd(None, [], PROMPT)
             joined = " ".join(cmd)
             assert "yolo" not in joined
+            assert "--force" not in joined
             assert "dangerously" not in joined
             assert "bypass" not in joined
 
