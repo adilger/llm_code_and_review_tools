@@ -77,7 +77,7 @@ class TestParser:
         assert resolve_model("claude") == "sonnet"
         assert resolve_model("codex") == "gpt-6.1-sol"
         assert resolve_model("gemini") is None
-        assert resolve_model("cursor") == "composer-2.5"
+        assert resolve_model("cursor") == "cursor-grok-4.6-high"
         assert resolve_model("claude", "fable") == "fable"
         monkeypatch.setenv("LREVIEW_MODEL", "opus")
         assert resolve_model("claude") == "opus"

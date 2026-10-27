@@ -134,7 +134,7 @@ def test_cursor_model_lines(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k:
                         subprocess.CompletedProcess(a, 0, listing, ""))
     lines = cursor_model_lines()
-    assert "composer-2.5 (default)" in lines[0]
+    assert "cursor-grok-4.6-high (default)" in lines[0]
     assert lines[1:] == ["  auto - Auto (Cursor's default)",
                          "  composer-2.5 - Composer 2.5"]
     monkeypatch.setattr(subprocess, "run", lambda *a, **k:

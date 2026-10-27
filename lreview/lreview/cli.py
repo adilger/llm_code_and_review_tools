@@ -112,7 +112,7 @@ def resolve_model(agent: str, model: str = None) -> str:
     Explicit --model wins, then $LREVIEW_MODEL unless another agent's
     catalog lists that name: the variable is shared by every agent,
     and `codex -m opus` only fails. claude defaults to
-    sonnet, codex to gpt-6.1-sol and cursor to composer-2.5,
+    sonnet, codex to gpt-6.1-sol and cursor to cursor-grok-4.6-high,
     the others to whatever their own CLI defaults to.
 
     codex aliases are expanded to the slug the CLI expects, so
@@ -1169,7 +1169,7 @@ def build_parser() -> argparse.ArgumentParser:
              "fable, haiku; codex: gpt-6.1-sol (default), "
              "gpt-6-sol, gpt-6-astra, gpt-5.6-sol/-terra/-luna, gpt-5.5, "
              "gpt-5.3-codex-spark, or their aliases (sol, astra, terra, "
-             "luna, spark); cursor: composer-2.5 (default) or any "
+             "luna, spark); cursor: cursor-grok-4.6-high (default) or any "
              "'agent --list-models' slug. "
              "$LREVIEW_MODEL sets the default; 'lreview models' "
              "prints the codex table")
