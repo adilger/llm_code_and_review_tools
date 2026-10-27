@@ -425,7 +425,7 @@ def cmd_run(args) -> int:
     from .agents import get_agent
     if not get_agent(args.agent).verified:
         print(f"note: the '{args.agent}' backend is best-effort and not "
-              "yet verified end-to-end; claude and codex are. Use "
+              "yet verified end-to-end; claude, codex and cursor are. Use "
               "--agent-arg to adjust flags if needed.")
     if not check_selection(args, resolve_model(args.agent, args.model)):
         return 1
@@ -854,7 +854,8 @@ def cmd_chat(args) -> int:
     from .agents import get_agent
     if not get_agent(args.agent).verified:
         print(f"note: the '{args.agent}' backend is best-effort and "
-              "not yet verified end-to-end; claude and codex are.")
+              "not yet verified end-to-end; claude, codex and cursor "
+              "are.")
     # chat passes --model alone, never a run default
     from .models import canonical_model
     model = canonical_model(args.agent, args.model)
@@ -1139,8 +1140,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--agent", choices=sorted(AGENTS), default=default_agent,
         help="Agent to run the reviews with (default: $LREVIEW_AGENT or "
-             "claude; claude and codex are the verified backends, "
-             "auggie, cursor, gemini and opencode are best-effort)")
+             "claude; claude, codex and cursor are the verified "
+             "backends, auggie, gemini and opencode are best-effort)")
     run_p.add_argument(
         "--model", default=None,
         help="Model for the review runs — claude: sonnet (default), opus, "

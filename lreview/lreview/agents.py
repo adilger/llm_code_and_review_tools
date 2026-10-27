@@ -5,10 +5,10 @@ review-core.md directly (the review-prompts README quick-start form),
 so every backend receives the same instruction text — only the
 headless CLI invocation differs per agent.
 
-Claude and codex are the verified backends. Both are run with a JSONL
-event stream (claude's --output-format stream-json, codex's --json)
-that lreview parses for token usage; only claude's carries a dollar
-cost and the model name. auggie, cursor, gemini and opencode are
+Claude, codex and cursor are the verified backends. All three are run
+with a JSONL event stream (claude's and cursor's --output-format
+stream-json, codex's --json) that lreview parses for token usage;
+only claude's carries a dollar cost. auggie, gemini and opencode are
 best-effort command templates.
 """
 
@@ -286,8 +286,7 @@ AGENTS = {
     "claude": AgentSpec(name="claude", stream_json=True),
     "codex": AgentSpec(name="codex", stream_json=True),
     "auggie": AgentSpec(name="auggie", stream_json=True, verified=False),
-    "cursor": AgentSpec(name="cursor", stream_json=True, verified=False,
-                        command="agent"),
+    "cursor": AgentSpec(name="cursor", stream_json=True, command="agent"),
     "gemini": AgentSpec(name="gemini", verified=False),
     "opencode": AgentSpec(name="opencode", verified=False),
 }

@@ -65,8 +65,8 @@ silent offline). `LREVIEW_PROMPTS_UPDATE=off` disables the check,
 
 ## Agents
 
-> **Disclaimer:** **claude** and **codex** are verified end-to-end.
-> auggie, cursor, gemini and opencode are best-effort integrations — expect
+> **Disclaimer:** **claude**, **codex** and **cursor** are verified
+> end-to-end. auggie, gemini and opencode are best-effort integrations — expect
 > to tweak invocation flags (`--agent-arg`) and please report what
 > works.
 
@@ -113,12 +113,17 @@ it a review.) Select the backend with
   (`gpt-5.3-codex-high`), so `--effort` is ignored. `--preload` sends
   the protocol and the commit on stdin, as for codex. A review that
   ends without `review-metadata.json` is asked for it once with
-  `--resume`, which continues the chat (Cursor cannot fork it, so
-  `-m` does not resume an earlier review). The final result event
-  gives the token total and `lreview stats` the tool calls; Cursor
-  reports no dollar cost, so cost stays blank. A live light review
-  has run; a full review on a Gerrit change has not yet been
-  verified.
+  `--resume`, which continues the chat. The `agent` CLI has no fork
+  option, so `-m` does not resume an earlier review: it starts a new
+  chat from the memory document, as for codex. `--lean` does nothing
+  for cursor. Cursor's `--exclude-workspace-context` would remove the
+  rules and skills, but the server refused it for the test account, so a
+  review keeps Cursor's own context, about 12K tokens. The final
+  result event gives the token total and `lreview stats` the tool
+  calls; Cursor reports no dollar cost, so cost stays blank. A full
+  review of a Gerrit change ran end to end with composer-2.5 on
+  2026-10-27 (64757: 2m35s, 1.5M tokens). `lreview chat` with
+  cursor has not been tried.
 - **gemini / opencode** — best-effort backends via `gemini --yolo -p`
   or `opencode run`. Reviews, logs, collection, and posting all work,
   but there is no token/cost/model reporting and the invocations have
@@ -740,7 +745,7 @@ opencode's `--model` wants the `provider/model` form.
 | `--results-dir DIR` | `$LREVIEW_RESULTS_DIR`, else `lreview-results/` in the llm tools checkout (cwd-relative without a checkout) | Logs, JSONs, summary.json |
 | `--worktrees-dir DIR` | auto | Where worktrees are created |
 | `--keep-worktrees` | off | Keep worktrees after review |
-| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex (verified), auggie, cursor, gemini, opencode |
+| `--agent NAME` | `claude` (or `$LREVIEW_AGENT`) | Agent backend: claude, codex, cursor (verified), auggie, gemini, opencode |
 | `--model NAME` | `sonnet` for claude, `gpt-6.1-sol` for codex (or `$LREVIEW_MODEL`); `composer-2.5` for cursor; auggie/gemini/opencode use their own default | Model for the review runs; see `lreview models`, `auggie models list --json` or `agent --list-models` |
 | `--effort LEVEL` | agent's default (or `$LREVIEW_EFFORT`) | Reasoning effort: low/medium/high/xhigh/max, plus `ultra` on the codex models that have it — claude (`--effort`), codex (`-c model_reasoning_effort=...`) or auggie (`--reasoning-effort`); ignored for gemini/opencode/cursor (a cursor model slug carries its effort). Known model ladders are checked before the run; Auggie validates its own model/effort support |
 | `--memory, -m` | off | Read/update the per-change review memory document |

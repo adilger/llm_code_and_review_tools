@@ -13,10 +13,9 @@ class TestRegistry:
     def test_supported_agents(self):
         assert set(AGENTS) == {"claude", "codex", "gemini", "opencode",
                                "auggie", "cursor"}
-        for name in ("auggie", "cursor"):
-            assert AGENTS[name].stream_json is True
-            assert AGENTS[name].verified is False
-        for name in ("claude", "codex"):
+        assert AGENTS["auggie"].stream_json is True
+        assert AGENTS["auggie"].verified is False
+        for name in ("claude", "codex", "cursor"):
             assert AGENTS[name].stream_json is True
             assert AGENTS[name].verified is True
         for name in ("gemini", "opencode"):
