@@ -86,10 +86,15 @@ def default_results_dir() -> str:
 
 
 def default_worktrees_dir(repo: Path, results_dir: Path) -> Path:
-    """Prefer the workspace ai_worktrees/ convention when present."""
-    ai_worktrees = repo.resolve().parent / "ai_worktrees"
-    if ai_worktrees.is_dir():
-        return ai_worktrees / "lreview"
+    """Use worktrees_dir from the config file, else <results-dir>/worktrees."""
+    from .config import load_config
+    configured = load_config().get("worktrees_dir")
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = repo.resolve().parent / path
+        path = path.resolve()
+        return path
     return results_dir / "worktrees"
 
 
@@ -1111,8 +1116,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--worktrees-dir", default=None,
         help="Where review worktrees are created (default: "
-             "<repo>/../ai_worktrees/lreview if ai_worktrees exists, "
-             "else <results-dir>/worktrees)")
+             "worktrees_dir from the config file, else "
+             "<results-dir>/worktrees)")
     run_p.add_argument(
         "--keep-worktrees", action="store_true",
         help="Do not remove worktrees after each review")
@@ -1422,6 +1427,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show findings that would be posted without contacting a provider")
     post_p.set_defaults(func=cmd_post)
 
+    from .config import apply_config
+    apply_config(sub.choices)
     return parser
 
 

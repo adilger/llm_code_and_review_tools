@@ -1,0 +1,39 @@
+# lreview configuration. Copy to ~/.config/lreview/lreview-config.toml
+# (or point $LREVIEW_CONFIG at it).
+#
+# A key is the long name of a command line option, without the leading
+# dashes ("stall-timeout" or "stall_timeout"). A top-level key is the
+# default for every command that has the option. A [command] table
+# ([run], [chat], [post], [stats]) applies to that command only and wins.
+#
+# Precedence: command line, then the option's environment variable
+# (for example $LREVIEW_AGENT), then this file, then the built-in default.
+# Options that name one invocation's targets (--last, --since, --local,
+# --dry-run, ...) cannot be set here. A boolean flag set to true here
+# (post, memory, keep-worktrees, series) cannot be turned off per run.
+
+# jobs = 5
+# mode = "full"            # or "light"
+# timeout = 7200
+# stall-timeout = 600
+# stall-retry = true
+# agent = "claude"
+# model = "sonnet"
+# effort = "high"
+# lean = true
+# preload = true
+# results-dir = "~/lreview-results"
+# worktrees_dir = "<results-dir>/worktrees"
+# prompts-dir = "~/review-prompts"
+# prefix = "[AI review - <model>]"
+# keep-worktrees = false
+# agent-arg = ["--some-flag"]
+# allow-tool = ["Bash(git log *)"]
+
+# [run]
+# post = false
+# memory = false
+# db = "~/lreview-db"
+
+# [chat]
+# model = "opus"

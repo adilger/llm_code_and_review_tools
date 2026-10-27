@@ -415,14 +415,26 @@ class TestCmdPost:
 
 class TestDefaultWorktreesDir:
 
-    def test_prefers_ai_worktrees_sibling(self, tmp_path):
+    def test_relative_config_value_is_next_to_repo(self, tmp_path,
+                                                   monkeypatch):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('worktrees_dir = "worktrees/agent/lreview"\n')
+        monkeypatch.setenv("LREVIEW_CONFIG", str(cfg))
         repo = tmp_path / "ws" / "repo"
         repo.mkdir(parents=True)
-        (tmp_path / "ws" / "ai_worktrees").mkdir()
         result = default_worktrees_dir(repo, tmp_path / "results")
-        assert result == tmp_path / "ws" / "ai_worktrees" / "lreview"
+        assert result == (tmp_path / "ws").resolve() / "worktrees" / "agent" / "lreview"
 
-    def test_falls_back_to_results_dir(self, tmp_path):
+    def test_absolute_config_value(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(f'worktrees_dir = "{tmp_path / "wt"}"\n')
+        monkeypatch.setenv("LREVIEW_CONFIG", str(cfg))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert default_worktrees_dir(repo, tmp_path / "r") == tmp_path / "wt"
+
+    def test_falls_back_to_results_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("LREVIEW_CONFIG", str(tmp_path / "missing.toml"))
         repo = tmp_path / "repo"
         repo.mkdir()
         results = tmp_path / "results"
@@ -763,3 +775,51 @@ class TestRunDryRun:
         assert doc.is_file()
         assert f"would clear memory: {doc}" in out
         assert "0 existing document(s), 1 new" in out
+
+
+class TestConfigDefaults:
+    """The config file supplies option defaults; CLI and env win."""
+
+    def _parse(self, tmp_path, monkeypatch, toml, argv, env=None):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(toml)
+        monkeypatch.setenv("LREVIEW_CONFIG", str(cfg))
+        for k, v in (env or {}).items():
+            monkeypatch.setenv(k, v)
+        return build_parser().parse_args(argv)
+
+    def test_top_level_key_sets_default(self, tmp_path, monkeypatch):
+        args = self._parse(tmp_path, monkeypatch,
+                           'jobs = 9\nmode = "light"\nstall-timeout = 30\n',
+                           ["run"])
+        assert (args.jobs, args.mode, args.stall_timeout) == (9, "light", 30)
+
+    def test_command_line_wins(self, tmp_path, monkeypatch):
+        args = self._parse(tmp_path, monkeypatch, "jobs = 9\n",
+                           ["run", "-j", "2"])
+        assert args.jobs == 2
+
+    def test_env_wins_over_file(self, tmp_path, monkeypatch):
+        args = self._parse(tmp_path, monkeypatch, 'agent = "codex"\n',
+                           ["run"], env={"LREVIEW_AGENT": "claude"})
+        assert args.agent == "claude"
+
+    def test_command_table_beats_top_level(self, tmp_path, monkeypatch):
+        toml = 'model = "sonnet"\n[chat]\nmodel = "opus"\n'
+        assert self._parse(tmp_path, monkeypatch, toml,
+                           ["chat"]).model == "opus"
+        assert self._parse(tmp_path, monkeypatch, toml,
+                           ["run"]).model == "sonnet"
+
+    def test_boolean_and_list(self, tmp_path, monkeypatch):
+        args = self._parse(tmp_path, monkeypatch,
+                           'lean = false\nagent-arg = ["--a"]\n', ["run"])
+        assert args.lean is False
+        assert args.agent_arg == ["--a"]
+
+    @pytest.mark.parametrize("toml", [
+        "jobz = 3\n", "jobs = 0\n", 'mode = "fast"\n', "last = 3\n",
+        "[run]\nnope = 1\n", "[nocmd]\njobs = 1\n"])
+    def test_bad_config_is_an_error(self, tmp_path, monkeypatch, toml):
+        with pytest.raises(SystemExit):
+            self._parse(tmp_path, monkeypatch, toml, ["run"])
