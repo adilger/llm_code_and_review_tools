@@ -12,28 +12,36 @@
 # --dry-run, ...) cannot be set here. A boolean flag set to true here
 # (post, memory, keep-worktrees, series) cannot be turned off per run.
 
+# Built-in defaults, defined in lreview/defaults.py. Update these lines
+# when you change a default there; tests/test_defaults.py checks them.
 # jobs = 5
 # mode = "full"            # or "light"
 # timeout = 7200
 # stall-timeout = 600
 # stall-retry = true
 # agent = "claude"
-# model = "sonnet"
-# effort = "high"
+# model = "sonnet"         # for the claude agent
 # lean = true
 # preload = true
-# results-dir = "~/lreview-results"
-# worktrees_dir = "<results-dir>/worktrees"
-# prompts-dir = "~/review-prompts"
 # prefix = "[AI review - <model>]"
-# keep-worktrees = false
-# agent-arg = ["--some-flag"]
-# allow-tool = ["Bash(git log *)"]
+
+# --- Options whose default is computed or empty ---
+# The value shown is an example. The comment gives the behavior when
+# the option is not set.
+# effort = "high"                     # the agent's own default effort
+# results-dir = "~/lreview-results"   # lreview-results/ in the tools checkout
+# worktrees_dir = "worktrees/agent/lreview"   # <results-dir>/worktrees;
+#                                     # top level only
+# prompts-dir = "~/review-prompts"    # $REVIEW_PROMPTS_DIR, the bundled
+#                                     # submodule, then ~/review-prompts
+# keep-worktrees = false              # false
+# agent-arg = ["--some-flag"]         # none
+# allow-tool = ["Bash(git log *)"]    # none
 
 # [run]
-# post = false
-# memory = false
-# db = "~/lreview-db"
+# post = false                        # false
+# memory = false                      # false
+# db = "~/lreview-db"                 # lreview-db/ in the tools checkout
 
 # [chat]
 # model = "opus"

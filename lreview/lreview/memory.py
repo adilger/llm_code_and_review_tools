@@ -19,7 +19,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-DB_DIRNAME = "lreview-db"
+from .defaults import DB_DIRNAME
+
 
 # Instructions handed to the agent alongside the review prompt
 MEMORY_PROMPT_PATH = Path(__file__).resolve().parent / "memory-prompt.md"

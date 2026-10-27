@@ -20,6 +20,9 @@ was written still works -- the table constrains only what it knows.
 from dataclasses import dataclass
 from typing import Optional
 
+from .defaults import (  # noqa: F401 (re-exported)
+    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL)
+
 # The union of every backend's effort ladder; individual agents and
 # models accept subsets (see CLAUDE_EFFORTS and CodexModel.efforts).
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
@@ -109,14 +112,6 @@ CODEX_MODELS = (
         aliases=("spark", "codex-spark"),
     ),
 )
-
-# Codex reviews default to gpt-6.1-sol: astra's capability at several
-# times less of the plan. Override with --model / $LREVIEW_MODEL.
-CODEX_DEFAULT_MODEL = "gpt-6.1-sol"
-
-# Sonnet 5.5 found as many known bugs as Opus 5.5 on lreview bench at
-# under half the cost and time (2026-10-09). --model opus for the rest.
-CLAUDE_DEFAULT_MODEL = "sonnet"
 
 CLAUDE_MODELS = ("sonnet", "opus", "fable", "haiku")
 

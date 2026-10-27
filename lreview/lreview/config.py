@@ -58,10 +58,25 @@ def _fail(path: Path, message: str):
 
 def _convert(path: Path, key: str, action, value):
     """Turn a TOML value into what the option's argparse type yields."""
-    if isinstance(value, list):
-        return [_convert(path, key, action, v) for v in value]
-    if isinstance(value, bool) or action.type is None:
+    is_list = isinstance(action, argparse._AppendAction)
+    if isinstance(value, list) != is_list:
+        _fail(path, f"bad value for '{key}': "
+                    f"{'needs' if is_list else 'must not be'} a list")
+    if is_list:
+        return [_convert_one(path, key, action, v) for v in value]
+    return _convert_one(path, key, action, value)
+
+
+def _convert_one(path: Path, key: str, action, value):
+    is_flag = (action.nargs == 0 or
+               isinstance(action, argparse.BooleanOptionalAction))
+    if isinstance(value, bool) != is_flag:
+        _fail(path, f"bad value for '{key}': "
+                    f"{'needs true or false' if is_flag else 'must not be true or false'}")
+    if is_flag or action.type is None:
         converted = value
+        if not is_flag and not isinstance(value, str):
+            _fail(path, f"bad value for '{key}': needs a string")
     else:
         try:
             converted = action.type(str(value))
@@ -70,7 +85,7 @@ def _convert(path: Path, key: str, action, value):
     if action.choices is not None and converted not in action.choices:
         _fail(path, f"bad value for '{key}': {value!r} "
                     f"(choose from {', '.join(map(str, action.choices))})")
-    if isinstance(converted, str) and (key.endswith("_dir") or key == "db"):
+    if isinstance(converted, str) and (action.dest.endswith("_dir") or action.dest == "db"):
         converted = os.path.expanduser(converted)
     return converted
 
@@ -103,8 +118,7 @@ def apply_config(subparsers: dict) -> None:
             _fail(path, f"unknown option '{key}'")
     for cmd, table in per_command.items():
         for key in table:
-            if (key.replace("-", "_") not in configurable[cmd]
-                    and key != "worktrees_dir"):
+            if key.replace("-", "_") not in configurable[cmd]:
                 _fail(path, f"unknown option '{key}' in [{cmd}]")
     for cmd, actions in configurable.items():
         values = dict(general)

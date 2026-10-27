@@ -408,7 +408,7 @@ install_tools() {
     # Install lreview
     install_tool lreview "$SCRIPT_DIR/lreview"
     # Seed the user's config once; never overwrite their edits.
-    lreview_cfg="${LREVIEW_CONFIG:-$HOME/.config/lreview/lreview-config.toml}"
+    local lreview_cfg="${LREVIEW_CONFIG:-$HOME/.config/lreview/lreview-config.toml}"
     if [ -e "$lreview_cfg" ]; then
         echo "  Keeping existing $lreview_cfg (not overwritten)"
     else

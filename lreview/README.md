@@ -805,7 +805,7 @@ replace its immutable revision placeholder. It uses `pull_request`, not
 ## Configuration
 
 Standing preferences live in a TOML file: `$LREVIEW_CONFIG`, else
-`~/.config/lreview/lreview-config.toml`. Copy `lreview-lreview-config.example.toml` to start.
+`~/.config/lreview/lreview-config.toml`. Copy `lreview-config.example.toml` to start.
 
 A key is the long name of a command line option without the dashes
 (`jobs`, `mode`, `stall-timeout`, `agent`, `model`, `effort`, `lean`,

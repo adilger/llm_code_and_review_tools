@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Optional
 
 from .agents import get_agent
+from .defaults import (  # noqa: F401 (DEFAULT_STALL_TIMEOUT re-exported)
+    DEFAULT_AGENT, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT)
 from .models import validate_selection
 from .gerrit import ResolvedChange
 from .artifacts import REVIEW_RESULT_NAME, validate_review_result
@@ -52,10 +54,6 @@ STATUS_TIMEOUT = "timeout"
 STATUS_INVALID_JSON = "invalid-json"
 STATUS_STALLED = "stalled"
 
-# Seconds a review may write nothing to its log before it is taken to
-# have stalled.  The longest quiet stretch in 196 codex and 32 claude
-# reviews was under four minutes.
-DEFAULT_STALL_TIMEOUT = 600
 
 # Grace period between SIGTERM and SIGKILL when a review times out
 _KILL_GRACE_SECONDS = 15
@@ -301,7 +299,7 @@ class ReviewResult:
     findings: int = 0
     severity: Optional[str] = None
     model: Optional[str] = None
-    agent: str = "claude"
+    agent: str = DEFAULT_AGENT
     effort: Optional[str] = None
     tokens: Optional[int] = None
     cost_usd: Optional[float] = None
@@ -326,14 +324,14 @@ class BatchConfig:
     worktrees_dir: Path
     prompts_dir: Path = Path.home() / "review-prompts" / "kernel"
     jobs: int = 5
-    timeout: int = 7200
+    timeout: int = DEFAULT_TIMEOUT
     # Kill a review whose log has not grown for this many seconds (0:
     # never), and start it once more unless stall_retry is off
     stall_timeout: float = DEFAULT_STALL_TIMEOUT
     stall_retry: bool = True
     keep_worktrees: bool = False
     mode: str = "full"
-    agent: str = "claude"
+    agent: str = DEFAULT_AGENT
     model: Optional[str] = None
     effort: Optional[str] = None
     # When set, the lreview-db directory: reviews read their per-change

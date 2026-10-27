@@ -823,3 +823,24 @@ class TestConfigDefaults:
     def test_bad_config_is_an_error(self, tmp_path, monkeypatch, toml):
         with pytest.raises(SystemExit):
             self._parse(tmp_path, monkeypatch, toml, ["run"])
+
+
+class TestConfigValueTypes:
+
+    @pytest.mark.parametrize("toml", [
+        'agent-arg = "--x"\n', "jobs = true\n", "lean = 1\n",
+        'jobs = [1]\n', "prefix = 5\n"])
+    def test_wrong_value_type_is_an_error(self, tmp_path, monkeypatch, toml):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(toml)
+        monkeypatch.setenv("LREVIEW_CONFIG", str(cfg))
+        with pytest.raises(SystemExit):
+            build_parser()
+
+    def test_hyphenated_dir_key_expands_tilde(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('results-dir = "~/rr"\n')
+        monkeypatch.setenv("LREVIEW_CONFIG", str(cfg))
+        monkeypatch.delenv("LREVIEW_RESULTS_DIR")
+        args = build_parser().parse_args(["run"])
+        assert args.results_dir == str(Path.home() / "rr")

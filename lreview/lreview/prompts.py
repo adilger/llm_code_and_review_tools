@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .defaults import DEFAULT_AGENT
+
 REVIEW_PROMPTS_REPO = "https://github.com/verygreen/review-prompts/"
 
 CORE_PROMPT = "review-core.md"
@@ -41,7 +43,7 @@ _PROMPT_PATH_RE = re.compile(r"(/\S+\.md)")
 class PromptsStatus:
     """Result of the review-prompts availability check."""
     available: bool
-    agent: str = "claude"
+    agent: str = DEFAULT_AGENT
     agent_cli: Optional[str] = None
     prompts_dir: Optional[Path] = None
     source: Optional[str] = None  # how the dir was found
@@ -100,7 +102,7 @@ def find_prompts_dir(explicit: Optional[Path] = None):
 
 
 def check_prompts(explicit: Optional[Path] = None,
-                  agent: str = "claude") -> PromptsStatus:
+                  agent: str = DEFAULT_AGENT) -> PromptsStatus:
     """Check the agent CLI and the review prompts are available."""
     status = PromptsStatus(available=False, agent=agent)
 
