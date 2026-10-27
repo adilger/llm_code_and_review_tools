@@ -124,8 +124,11 @@ class AgentSpec:
             # --force, so a shell command no rule allows is rejected.
             # The sandbox stays off: in the sandbox, Cursor runs every
             # shell command whatever the rules say.
+            # --disable-indexing: never sync the worktree to Cursor's
+            # servers for search. A -p run skipped it in our tests
+            # (2026.10.22), but nothing documents that.
             cmd = ["agent", "-p", "--output-format", "stream-json",
-                   "--trust"]
+                   "--trust", "--disable-indexing"]
             if allowed_tools:
                 cmd += ["--sandbox", "disabled"]
             else:

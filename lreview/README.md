@@ -101,7 +101,8 @@ it a review.) Select the backend with
   Auggie may omit token counts. The adapter is tested with a fake worker;
   a live account review has not yet been verified.
 - **cursor (Cursor Agent)** — runs Cursor's `agent` CLI as
-  `agent -p --output-format stream-json --trust --force`, or with
+  `agent -p --output-format stream-json --trust --disable-indexing
+  --force`, or with
   `--allow-tool` rules, `--sandbox disabled` in place of `--force`
   (see the table below). `--trust` is required: each review runs in a new
   worktree, and an untrusted workspace ends a headless run at once.
@@ -124,6 +125,11 @@ it a review.) Select the backend with
   review of a Gerrit change ran end to end with composer-2.5 on
   2026-10-27 (64757: 2m35s, 1.5M tokens). `lreview chat` with
   cursor has not been tried.
+  **Privacy:** `--disable-indexing` (a hidden CLI option) stops Cursor
+  from syncing the worktree to its servers for search. Turn on Privacy
+  Mode for the Cursor account. Do not review private code with a model
+  that `agent --list-models` marks "NO ZDR" (no zero data retention),
+  such as the Fable models.
 - **gemini / opencode** — best-effort backends via `gemini --yolo -p`
   or `opencode run`. Reviews, logs, collection, and posting all work,
   but there is no token/cost/model reporting and the invocations have

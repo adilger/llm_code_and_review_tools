@@ -40,7 +40,7 @@ class TestBuildCmd:
         cmd = get_agent("cursor").build_cmd(
             "gpt-5.3-codex-high", "high", ["--extra"], PROMPT)
         assert cmd == ["agent", "-p", "--output-format", "stream-json",
-                       "--trust", "--force",
+                       "--trust", "--disable-indexing", "--force",
                        "--model", "gpt-5.3-codex-high", "--extra", PROMPT]
 
     def test_cursor_allowlist_drops_force_and_sandbox(self):
@@ -49,7 +49,8 @@ class TestBuildCmd:
         cmd = get_agent("cursor").build_cmd(
             None, None, [], PROMPT, allowed_tools=["Shell(git:log *)"])
         assert cmd == ["agent", "-p", "--output-format", "stream-json",
-                       "--trust", "--sandbox", "disabled", PROMPT]
+                       "--trust", "--disable-indexing",
+                       "--sandbox", "disabled", PROMPT]
 
     def test_write_cursor_permissions(self, tmp_path):
         import json
