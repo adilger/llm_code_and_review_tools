@@ -254,7 +254,8 @@ def cmd_check(args) -> int:
     from .doctor import check_agent_login, check_gerrit
     status = check_prompts(explicit=args.prompts_dir, agent=args.agent)
     if status.agent_cli and not args.no_login:
-        login_ok, login_detail = check_agent_login(args.agent)
+        login_ok, login_detail = check_agent_login(
+            args.agent, live=args.live_login)
     else:
         login_ok, login_detail = True, "not checked"
     if args.github:
@@ -1071,7 +1072,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompts-dir", default=default_prompts, help=prompts_help)
     check_p.add_argument(
         "--no-login", action="store_true",
-        help="skip the login check (for claude, one prompt to haiku)")
+        help="skip the login check")
+    check_p.add_argument(
+        "--live-login", action="store_true",
+        help="check claude's login with one prompt to haiku (about "
+             "1.5 cents), not only the stored credential")
     check_p.add_argument("--github", action="store_true",
         help="check GitHub token (GH_TOKEN, falling back to GITHUB_TOKEN) instead of Gerrit")
     check_p.set_defaults(func=cmd_check)
@@ -1438,7 +1443,7 @@ def build_parser() -> argparse.ArgumentParser:
                        "installed and logged in")
     agents_p.add_argument(
         "--no-login", action="store_true",
-        help="skip the login checks (for claude, one prompt to haiku)")
+        help="skip the login checks; check PATH only")
     agents_p.set_defaults(func=cmd_agents)
 
     render_p = sub.add_parser(

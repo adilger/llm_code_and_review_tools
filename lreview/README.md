@@ -52,10 +52,13 @@ exact instructions for anything missing:
    with a real read-only API call.
 
 `lreview check` runs the same checks non-interactively (for scripts
-and CI), and also checks the agent is logged in: claude is asked one
-prompt on haiku with no tools (about 1.5 cents, a few seconds), codex
-runs `codex login status`. A failed login is "NOT ready" and exit 2.
-`--no-login` skips it.
+and CI), and also checks the agent is logged in: claude runs
+`claude auth status`, codex `codex login status` and cursor
+`agent status`. These checks cost nothing. `claude auth status` reads
+only the stored credential. `--live-login` asks claude one prompt on
+haiku with no tools instead (about 1.5 cents, a few seconds), which
+also finds a revoked credential. A failed login is "NOT ready" and
+exit 2. `--no-login` skips the check.
 
 **Prompt freshness:** before a run, lreview checks the prompts
 checkout against its upstream and fast-forwards it automatically

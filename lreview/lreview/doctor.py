@@ -75,19 +75,22 @@ _AUTH_FAILURES = ("not logged in", "/login", "authentication_failed",
                   "invalid api key", "oauth token")
 
 
-def check_agent_login(agent: str) -> Tuple[bool, str]:
+def check_agent_login(agent: str, live: bool = False) -> Tuple[bool, str]:
     """Verify the agent CLI is logged in, as a review would find it.
 
     Being on PATH says nothing about the login: a review then fails
-    authentication before producing anything. Claude is asked one turn
-    on haiku with no tools, about 1.5 cents; codex has "login status"
-    and cursor "agent status", which spend nothing. The other
-    backends are not checked.
+    authentication before producing anything. claude has "auth
+    status", codex "login status" and cursor "agent status", which
+    spend nothing. "auth status" reads the stored credential only, so
+    live=True asks claude one turn on haiku with no tools instead,
+    about 1.5 cents. The other backends are not checked.
     """
     import json
     import subprocess
 
-    if agent == "claude":
+    if agent == "claude" and not live:
+        cmd = ["claude", "auth", "status", "--json"]
+    elif agent == "claude":
         cmd = ["claude", "-p", LOGIN_PROMPT, "--output-format", "json",
                "--max-turns", "1", "--model", "haiku", "--tools", "",
                "--no-session-persistence"]
@@ -109,6 +112,17 @@ def check_agent_login(agent: str) -> Tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, f"{agent} did not answer in {LOGIN_TIMEOUT}s"
     said = " ".join((done.stdout + " " + done.stderr).split())
+    if agent == "claude" and not live:
+        try:
+            status = json.loads(done.stdout)
+        except ValueError:
+            status = {}
+        if (done.returncode == 0 and isinstance(status, dict)
+                and status.get("loggedIn")):
+            how = status.get("authMethod") or "unknown method"
+            plan = status.get("subscriptionType")
+            return True, f"logged in via {how}" + (f" ({plan})" if plan else "")
+        return False, f"claude is not logged in: {said[-300:] or 'no status'}"
     if agent == "claude":
         try:
             result = json.loads(done.stdout)
