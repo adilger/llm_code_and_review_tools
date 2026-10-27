@@ -242,7 +242,8 @@ class AgentSpec:
                 cmd += ["--reasoning-effort", effort]
             return cmd + extra_args + [prompt_text]
         if self.name == "cursor":
-            cmd = ["agent"]
+            # Each chat runs in a new worktree, as a review does.
+            cmd = ["agent", "--trust", "--disable-indexing"]
             if model:
                 cmd += ["--model", model]
             return cmd + extra_args + [prompt_text]

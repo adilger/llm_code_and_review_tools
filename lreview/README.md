@@ -136,8 +136,11 @@ it a review.) Select the backend with
   result event gives the token total and `lreview stats` the tool
   calls; Cursor reports no dollar cost, so cost stays blank. A full
   review of a Gerrit change ran end to end with composer-2.5 on
-  2026-10-27 (64757: 2m35s, 1.5M tokens). `lreview chat` with
-  cursor has not been tried.
+  2026-10-27 (64757: 2m35s, 1.5M tokens).
+  The `lreview chat` command with cursor ran on the same review in `-p` mode, and the interactive
+  screen started in a pseudo-terminal. The chat command also passes
+  `--trust` and `--disable-indexing`. Without `--trust`, each chat
+  stops at a workspace trust prompt.
   **Privacy:** `--disable-indexing` (a hidden CLI option) stops Cursor
   from syncing the worktree to its servers for search. Turn on Privacy
   Mode for the Cursor account. Do not review private code with a model

@@ -186,6 +186,12 @@ class TestBuildInteractiveCmd:
                        "--model", "anthropic/claude-sonnet-5",
                        "--prompt", PROMPT]
 
+    def test_cursor_chat_trusts_the_new_worktree(self):
+        cmd = get_agent("cursor").build_interactive_cmd(
+            "composer-2.5", [], PROMPT)
+        assert cmd == ["agent", "--trust", "--disable-indexing",
+                       "--model", "composer-2.5", PROMPT]
+
     def test_no_bypass_flags_in_interactive_mode(self):
         for name in ("claude", "codex", "gemini", "opencode", "auggie",
                      "cursor"):
