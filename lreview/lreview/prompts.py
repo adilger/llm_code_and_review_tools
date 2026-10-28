@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .agents import get_agent
 from .defaults import DEFAULT_AGENT
 
 REVIEW_PROMPTS_REPO = "https://github.com/verygreen/review-prompts/"
@@ -106,10 +107,11 @@ def check_prompts(explicit: Optional[Path] = None,
     """Check the agent CLI and the review prompts are available."""
     status = PromptsStatus(available=False, agent=agent)
 
-    status.agent_cli = shutil.which(agent)
+    binary = get_agent(agent).binary
+    status.agent_cli = shutil.which(binary)
     if not status.agent_cli:
         status.problems.append(
-            f"{agent} CLI not found on PATH (install it first)")
+            f"{agent} CLI ('{binary}') not found on PATH (install it first)")
 
     prompts_dir, source = find_prompts_dir(explicit)
     if prompts_dir is None:

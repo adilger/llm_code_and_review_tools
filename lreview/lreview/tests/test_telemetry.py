@@ -125,6 +125,56 @@ class TestParseLog:
         assert tel.agent == "codex" and tel.complete
         assert tel.reported_tokens == 120 and tel.calls == []
 
+    def test_cursor_log_has_totals_only(self, tmp_path):
+        log = tmp_path / "kreview-3_ps1-x.1.log"
+        log.write_text(
+            json.dumps({"type": "system", "subtype": "init",
+                        "model": "Auto Balance"}) + "\n"
+            + json.dumps({"type": "result", "subtype": "success",
+                          "usage": {"inputTokens": 100, "outputTokens": 20,
+                                    "cacheReadTokens": 500,
+                                    "cacheWriteTokens": 0}}) + "\n")
+        tel = parse_log(log)
+        assert tel.agent == "cursor" and tel.complete
+        assert tel.reported_tokens == 620
+        s = tel.summary()
+        assert s["cost_usd"] is None
+        assert s["tokens"]["cache_read"] == 500
+        assert s["tokens"]["output"] == 20
+
+    def test_cursor_tool_calls(self, tmp_path):
+        def tool(sub, call_id, ms, kind, args, result=None):
+            body = {"args": args}
+            if result is not None:
+                body["result"] = result
+            return json.dumps({"type": "tool_call", "subtype": sub,
+                               "call_id": call_id, "timestamp_ms": ms,
+                               "tool_call": {kind: body}}) + "\n"
+        log = tmp_path / "kreview-4_ps1-x.1.log"
+        log.write_text(
+            tool("started", "a", 1000, "shellToolCall",
+                 {"command": "git -C /w show HEAD"})
+            + tool("completed", "a", 3000, "shellToolCall",
+                   {"command": "git -C /w show HEAD"},
+                   {"success": {"stdout": "x" * 400}})
+            + tool("started", "b", 4000, "shellToolCall",
+                   {"command": "cd /w && git log"})
+            + tool("completed", "b", 4500, "shellToolCall",
+                   {"command": "cd /w && git log"}, {"rejected": {}})
+            + json.dumps({"type": "result", "subtype": "success",
+                          "duration_ms": 6000,
+                          "usage": {"inputTokens": 1, "outputTokens": 1,
+                                    "cacheReadTokens": 0,
+                                    "cacheWriteTokens": 0}}) + "\n")
+        tel = parse_log(log)
+        assert tel.agent == "cursor"
+        show, rejected = tel.tools
+        assert (show.name, show.category, show.seconds) == ("Bash", "git", 2.0)
+        assert show.chars == 400 and show.tokens == 100 and not show.error
+        assert rejected.error
+        assert tel.started == 1.0 and tel.finished == 4.5
+        assert tel.summary()["tool_calls"] == 2
+
     def test_write_telemetry(self, review_log, tmp_path):
         dest = tmp_path / "t.json"
         summary = write_telemetry(review_log, dest, {"lean": True})
@@ -154,6 +204,15 @@ class TestStats:
         text = render([tel.summary()], [tel.to_json()], calls=True)
         assert "1 review(s)" in text
         assert "prompt" in text and "calls of" in text
+
+    def test_render_without_costs(self, tmp_path):
+        """codex and cursor report no dollar cost."""
+        log = tmp_path / "kreview-5_ps1-x.1.log"
+        log.write_text(json.dumps({"type": "result", "subtype": "success",
+                                   "usage": {"inputTokens": 1}}) + "\n")
+        tel = parse_log(log)
+        text = render([tel.summary()], [tel.to_json()])
+        assert "1 review(s): cost total -, median -" in text
 
     def test_cmd_stats_reads_a_directory(self, review_log, capsys):
         args = Namespace(paths=[str(review_log.parent)], results_dir=".",

@@ -75,9 +75,12 @@ def render(rows, details=None, calls=False, top=10) -> str:
     costs = [r["cost_usd"] for r in rows if r.get("cost_usd") is not None]
     walls = [r["wall_s"] for r in rows if r.get("wall_s")]
     lines.append("")
-    lines.append(f"{len(rows)} review(s): cost total {_money(sum(costs))}, "
-                 f"median {_money(statistics.median(costs))}; wall median "
-                 f"{_minutes(statistics.median(walls)).strip()}")
+    # codex and cursor report no dollar cost
+    lines.append(
+        f"{len(rows)} review(s): cost total "
+        f"{_money(sum(costs)) if costs else '-'}, median "
+        f"{_money(statistics.median(costs)) if costs else '-'}; wall median "
+        f"{_minutes(statistics.median(walls)).strip() if walls else '-'}")
 
     split = defaultdict(float)
     for row in rows:

@@ -129,6 +129,19 @@ def _result_chars(content) -> int:
     return 0
 
 
+# The result event's usage keys: claude's, then cursor's (camelCase).
+# Each set is disjoint, cached input included once.
+RESULT_USAGE_KEYS = (
+    "input_tokens", "cache_creation_input_tokens",
+    "cache_read_input_tokens", "output_tokens",
+    "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens")
+
+
+def result_tokens(usage: dict) -> int:
+    """Total tokens in a result event's usage, claude's or cursor's."""
+    return sum(usage.get(key, 0) or 0 for key in RESULT_USAGE_KEYS)
+
+
 @dataclass
 class Call:
     """One model call."""
@@ -213,6 +226,9 @@ class Telemetry:
     # codex reports one usage total and no per-call detail
     codex_usage: dict = field(default_factory=dict)
     codex_messages: int = 0
+    # cursor reports its totals once, in the result event, and no
+    # per-call usage
+    cursor_usage: dict = field(default_factory=dict)
     tool_count: int = 0
     complete: bool = False
 
@@ -296,6 +312,13 @@ class Telemetry:
                     "cache_read": u["cached_input_tokens"],
                     "output": u["output_tokens"],
                     "thinking": u["reasoning_output_tokens"]}
+        if self.cursor_usage:
+            u = self.cursor_usage
+            return {"new_input": u["inputTokens"],
+                    "cache_write": u["cacheWriteTokens"],
+                    "cache_read": u["cacheReadTokens"],
+                    "output": u["outputTokens"],
+                    "thinking": None}
         return {"new_input": sum(c.new_input for c in self.calls),
                 "cache_write": sum(c.cache_write for c in self.calls),
                 "cache_read": sum(c.cache_read for c in self.calls),
@@ -334,7 +357,7 @@ class Telemetry:
             "tool_calls": len(self.tools),
             "cost_usd": (round(self.reported_cost, 4)
                          if self.reported_cost is not None
-                         else None if self.agent == "codex"
+                         else None if self.agent in ("codex", "cursor")
                          else round(computed, 4)),
             "computed_cost_usd": round(computed, 4),
             "split_usd": {k: round(v, 4) for k, v in split.items()},
@@ -361,6 +384,49 @@ class Telemetry:
         return data
 
 
+# cursor's tool kinds, by the names claude gives the same tools
+_CURSOR_TOOLS = {"shell": "Bash", "read": "Read", "edit": "Edit",
+                 "write": "Write", "grep": "Grep", "glob": "Glob",
+                 "ls": "LS", "delete": "Delete"}
+
+
+def cursor_tool(event: dict):
+    """(name, args, result) of a cursor tool_call event."""
+    call = event.get("tool_call") or {}
+    for key, body in call.items():
+        if key.endswith("ToolCall") and isinstance(body, dict):
+            kind = key[:-len("ToolCall")]
+            name = _CURSOR_TOOLS.get(kind, kind[:1].upper() + kind[1:])
+            return name, body.get("args") or {}, body.get("result")
+    return "?", {}, None
+
+
+def _cursor_tool(event: dict, ts, tools: dict, call: int) -> None:
+    """Record one cursor tool_call event: started issues the call,
+    completed answers it."""
+    call_id = event.get("call_id") or f"cu{len(tools)}"
+    name, args, result = cursor_tool(event)
+    tool = tools.get(call_id)
+    if tool is None:
+        tool = tools[call_id] = ToolUse(
+            id=call_id, name=name, what=_describe(name, args),
+            category=categorize(name, json.dumps(args)),
+            call=max(call, 0), agent="main", issued=ts)
+    if event.get("subtype") != "completed":
+        return
+    tool.answered = ts
+    result = result if isinstance(result, dict) else {}
+    # "success", or "rejected", "error", "writePermissionDenied", ...
+    outcome = next(iter(result), "")
+    tool.error = outcome != "success"
+    body = result.get(outcome)
+    if isinstance(body, dict):
+        tool.chars = len(str(body.get("content") or body.get("stdout")
+                             or body.get("errorMessage") or ""))
+    # No per-call usage to measure the context growth by, as for codex
+    tool.tokens = tool.chars // CHARS_PER_TOKEN
+
+
 def parse_log(path: Path) -> Telemetry:
     """Read a review's stream-json log into per-call telemetry."""
     path = Path(path)
@@ -382,6 +448,8 @@ def parse_log(path: Path) -> Telemetry:
                 continue
             kind = event.get("type")
             ts = _ts(event.get("timestamp"))
+            if ts is None and event.get("timestamp_ms"):
+                ts = event["timestamp_ms"] / 1000  # cursor
             agent = event.get("parent_tool_use_id") or "main"
 
             if kind == "system":
@@ -399,6 +467,14 @@ def parse_log(path: Path) -> Telemetry:
                 elif sub == "task_summary" and event.get("detail"):
                     label = event["detail"]
                     tel.labels.append((len(order), label))
+                continue
+
+            if kind == "tool_call":
+                tel.agent = "cursor"
+                _cursor_tool(event, ts, tools, len(order) - 1)
+                if ts:
+                    tel.started = tel.started or ts
+                    tel.finished = ts
                 continue
 
             if kind == "thread.started":
@@ -508,12 +584,16 @@ def parse_log(path: Path) -> Telemetry:
                 if event.get("duration_api_ms"):
                     tel.reported_api_seconds = event["duration_api_ms"] / 1000
                 usage = event.get("usage") or {}
-                tel.reported_tokens = sum(usage.get(k, 0) or 0 for k in (
-                    "input_tokens", "cache_creation_input_tokens",
-                    "cache_read_input_tokens", "output_tokens"))
+                tel.reported_tokens = result_tokens(usage)
                 details = usage.get("output_tokens_details") or {}
                 tel.thinking_tokens = details.get("thinking_tokens")
                 tel.reported_output = usage.get("output_tokens")
+                if "inputTokens" in usage:
+                    tel.agent = "cursor"
+                    tel.cursor_usage = {k: usage.get(k, 0) or 0 for k in (
+                        "inputTokens", "cacheWriteTokens", "cacheReadTokens",
+                        "outputTokens")}
+                    tel.reported_output = tel.cursor_usage["outputTokens"]
                 for name, entry in (event.get("modelUsage") or {}).items():
                     if not name.startswith(tel.model or "\0"):
                         tel.side_models[name] = entry.get("costUSD") or 0.0

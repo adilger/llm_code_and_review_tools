@@ -122,28 +122,40 @@ found only what round 1 had found, and over three rounds memory found
 Reviews run on Sonnet by default; on the benchmark it found as many
 known bugs as Opus at under half the cost and time.
 
-Before spending another round on the same backend, get a second opinion
-from codex if you have it -- most do not. `lreview check --agent codex`
-says whether it is installed and logged in:
+Before you spend another round on the same backend, get a second
+opinion from a different backend. Run `lreview agents`. It shows
+which backends are installed and logged in. Use the first one in this
+list that it reports as `ready`:
+
+1. `codex`. On the benchmark it found the most known bugs. Some of
+   them, both Claude models missed.
+2. `cursor`, which runs the Cursor `agent` CLI. Its models are
+   different from the Claude and codex models.
+3. The other Claude model (`--agent claude --model opus`), when no
+   other backend is ready.
 
 ```bash
-lreview run --repo <tree> --last 2 --agent codex -o /tmp/lreview-codex.txt   # codex defaults to gpt-6.1-sol
+lreview agents                   # which backends are ready
+lreview run --repo <tree> --last 2 --agent codex -o /tmp/lreview-2nd.txt
+lreview run --repo <tree> --last 2 --agent cursor -o /tmp/lreview-2nd.txt
 ```
 
-On the benchmark codex found the most known bugs, including some both
-Claude models missed, and different ones. Without codex, take the second
-opinion from the other Claude model instead (`--model opus`).
+Use the default model of the backend. `lreview models --agent <name>`
+lists the other models:
 
-A second backend regularly finds real defects that more rounds on the
-first keep missing. Different backends fail differently; `lreview models` lists what each accepts
-(claude: sonnet, opus, fable, haiku; codex: astra, sol, terra, luna,
-spark, with an `--effort` level).
+- claude: sonnet, opus, fable and haiku.
+- codex: astra, sol, terra, luna and spark, with an `--effort` level.
+- cursor: the slugs from `agent --list-models`. Each slug includes the
+  effort.
 
-Inside a Patch Watcher run, use lreview for reviews and do not start
-`claude` or `codex` yourself. In a Claude run lreview reviews with Claude;
-`codex` is only in Codex runs, so skip the codex opinion there. Results go
-to `$LREVIEW_RESULTS_DIR`,
-which the run sets to its own tmp.
+A second backend often finds real defects that more rounds on the
+first backend do not find. Different backends fail in different ways.
+
+Inside a Patch Watcher run, use lreview for reviews. Do not start
+`claude`, `codex` or `agent` yourself. A Claude run has no `codex`,
+so `lreview agents` decides which second opinion is ready.
+Results go to `$LREVIEW_RESULTS_DIR`, which the run sets to its own
+tmp.
 
 ## The comment-bloat trap
 

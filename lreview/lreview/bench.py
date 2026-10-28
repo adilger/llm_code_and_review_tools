@@ -142,6 +142,18 @@ def offline_env(bench_dir: Path) -> dict:
     return {"PATH": f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"}
 
 
+def offline_rules() -> tuple:
+    """cursor's offline rules: (allow, deny).
+
+    The PATH shims do not reach cursor's shell, which starts a login
+    shell and rebuilds PATH. Its web fetch and web search tools also
+    run under --force. So cursor runs offline without --force: every
+    shell command is allowed but the network ones, and the web tools,
+    which no rule allows, are rejected."""
+    return (["Shell(*)"],
+            [f"Shell({name}:*)" for name in OFFLINE_COMMANDS])
+
+
 def bench_change(case: dict) -> LocalChange:
     return LocalChange(ref_name=f"bench-{case['id']}", sha=case["sha"],
                        subject=case["subject"],

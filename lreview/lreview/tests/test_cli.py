@@ -58,7 +58,7 @@ class TestParser:
         args = build_parser().parse_args(["run", "1", "--agent", "gemini"])
         assert args.agent == "gemini"
         with pytest.raises(SystemExit):
-            build_parser().parse_args(["run", "1", "--agent", "cursor"])
+            build_parser().parse_args(["run", "1", "--agent", "windsurf"])
 
     def test_effort_flag_and_env(self, monkeypatch):
         monkeypatch.setenv("LREVIEW_EFFORT", "high")
@@ -77,6 +77,7 @@ class TestParser:
         assert resolve_model("claude") == "sonnet"
         assert resolve_model("codex") == "gpt-6.1-sol"
         assert resolve_model("gemini") is None
+        assert resolve_model("cursor") == "cursor-grok-4.6-high"
         assert resolve_model("claude", "fable") == "fable"
         monkeypatch.setenv("LREVIEW_MODEL", "opus")
         assert resolve_model("claude") == "opus"
@@ -227,6 +228,11 @@ class TestParser:
     def test_check_parses(self):
         args = build_parser().parse_args(["check"])
         assert args.func.__name__ == "cmd_check"
+
+    def test_agents_parses(self):
+        args = build_parser().parse_args(["agents", "--no-login"])
+        assert args.func.__name__ == "cmd_agents"
+        assert args.no_login is True
 
     def test_command_required(self):
         with pytest.raises(SystemExit):

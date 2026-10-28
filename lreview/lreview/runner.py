@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .agents import get_agent
+from .agents import get_agent, write_cursor_permissions
 from .defaults import (  # noqa: F401 (DEFAULT_STALL_TIMEOUT re-exported)
     DEFAULT_AGENT, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT)
 from .models import validate_selection
@@ -37,6 +37,7 @@ from .manifest import SUMMARY_NAME, locked_summary  # noqa: F401 (re-export)
 from .markdown import write_review_markdown
 from .ui import console, elapsed as _elapsed, format_tokens  # noqa: F401
 from . import worktree as wt
+from .telemetry import result_tokens
 
 REVIEW_JSON_NAME = "gerrit-review.json"
 METADATA_JSON_NAME = "review-metadata.json"
@@ -170,7 +171,8 @@ def live_token_count(log_path: Path) -> Optional[int]:
 def parse_final_usage(log_path: Path):
     """Total tokens and cost from the agent's final usage event.
 
-    claude's stream-json result event carries both. codex's
+    claude's stream-json result event carries both; cursor's carries
+    usage only, in camelCase. codex's
     turn.completed event carries usage only — a ChatGPT-plan run has
     no dollar figure to report — and its input_tokens already include
     the cached ones (cached_input_tokens is a subset, and
@@ -196,11 +198,7 @@ def parse_final_usage(log_path: Path):
             return (tokens or None), None
         if obj.get("type") != "result":
             continue
-        usage = obj.get("usage") or {}
-        tokens = sum(
-            usage.get(key, 0) for key in (
-                "input_tokens", "cache_creation_input_tokens",
-                "cache_read_input_tokens", "output_tokens"))
+        tokens = result_tokens(obj.get("usage") or {})
         cost = obj.get("total_cost_usd")
         billing = obj.get("billing") or {}
         if billing.get("usage_unit") == "usd":
@@ -251,9 +249,9 @@ _NO_SESSION_TEXT = "No conversation found with session ID"
 
 
 def parse_session_id(log_path: Path) -> Optional[str]:
-    """The Claude session ID a stream-json log reports, or None.
+    """The claude or cursor session ID a stream-json log reports, or None.
 
-    Every claude event carries it; the init event opens the log and the
+    Every claude and cursor event carries it; the init event opens the log and the
     result event closes it, so the head and the tail are enough.
     """
     try:
@@ -348,9 +346,12 @@ class BatchConfig:
     # Added to the agent's environment (e.g. lreview bench's offline PATH)
     env: dict = field(default_factory=dict)
     agent_args: list[str] = field(default_factory=list)
-    # Claude only: permission rules for an allowlist run (see
-    # expand_allowed_tools). Empty: --dangerously-skip-permissions.
+    # claude and cursor: permission rules for an allowlist run (see
+    # expand_allowed_tools), each in its agent's syntax. Empty:
+    # --dangerously-skip-permissions (claude) or --force (cursor).
     allowed_tools: list[str] = field(default_factory=list)
+    # cursor only: deny rules for the same file (lreview bench offline)
+    denied_tools: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # git -C <repo> resolves relative paths against the repo, not
@@ -360,10 +361,10 @@ class BatchConfig:
         self.worktrees_dir = Path(self.worktrees_dir).expanduser().resolve()
         self.prompts_dir = Path(self.prompts_dir).expanduser().resolve()
         get_agent(self.agent)  # fail fast on unknown agents
-        if self.allowed_tools and self.agent != "claude":
-            raise ValueError("--allow-tool needs the claude agent")
+        if self.allowed_tools and self.agent not in ("claude", "cursor"):
+            raise ValueError("--allow-tool needs the claude or cursor agent")
         for rule in self.allowed_tools:
-            if "," in rule:
+            if self.agent == "claude" and "," in rule:
                 raise ValueError(f"--allow-tool rule has a comma: {rule}")
         # A model that cannot do the requested effort only fails once
         # codex is running, after the worktree is built — check here,
@@ -450,7 +451,7 @@ def review_prompt(config: BatchConfig,
         prompt += ".\n\n" + CLOSING_NOTE
     if preloaded and worktree is not None:
         prompt += commit_text(worktree)
-    if preloaded and config.agent == "codex":
+    if preloaded and config.agent in ("codex", "cursor"):
         # The protocol first: the same text leads every review's prompt,
         # so the provider's prefix cache shares it between them.
         prompt = preload_file(config).read_text() + "\n\n" + prompt
@@ -481,14 +482,15 @@ PRELOAD_COMMIT_LIMIT = 96 * 1024
 
 def _preloading(config: BatchConfig, change) -> bool:
     return (config.preload and config.mode == "full"
-            and config.agent in ("claude", "codex")
+            and config.agent in ("claude", "codex", "cursor")
             and getattr(change, "provider", None) != "github")
 
 
 def _prompt_on_stdin(config: BatchConfig, change) -> bool:
-    """codex has no system-prompt file: its preloaded protocol leads the
-    first message, which goes in on stdin."""
-    return config.agent == "codex" and _preloading(config, change)
+    """codex and cursor have no system-prompt file: the preloaded
+    protocol leads the first message, which goes in on stdin."""
+    return (config.agent in ("codex", "cursor")
+            and _preloading(config, change))
 
 
 def preload_file(config: BatchConfig) -> Path:
@@ -784,24 +786,28 @@ _METADATA_NUDGE_TIMEOUT = 600
 
 def _ask_for_metadata(config: BatchConfig, change, log_path: Path,
                       worktree_dir: Path, extra_env: dict):
-    """Resume a claude review that ended without review-metadata.json
-    and ask for the file once.
+    """Resume a claude or cursor review that ended without
+    review-metadata.json and ask for the file once.
 
     Returns that turn's (tokens, cost_usd), or None when it could not
     be asked.  The turn has its own log beside the review's, named so
     that nothing taking kreview-*.log for a review picks it up.
     """
-    if config.agent != "claude":
+    if config.agent not in ("claude", "cursor"):
         return None
     session_id = parse_session_id(log_path)
     if not session_id:
         return None
     nudge_log = log_path.with_suffix(".metadata-nudge.jsonl")
-    cmd = get_agent("claude").build_cmd(
+    # The same allowlist as the review: without one, claude skips
+    # permissions and cursor runs --force.
+    cmd = get_agent(config.agent).build_cmd(
         config.model, config.effort, config.agent_args, METADATA_NUDGE,
         resume=session_id, lean=config.lean,
         system_file=(str(preload_file(config))
-                     if _preloading(config, change) else None))
+                     if _preloading(config, change)
+                     and config.agent == "claude" else None),
+        allowed_tools=expand_allowed_tools(config, worktree_dir))
     _log(f"[{change.slug}] note: the review ended without "
          f"{METADATA_JSON_NAME}; asking for it once")
     try:
@@ -908,7 +914,8 @@ def stall_point(log_path: Path) -> dict:
 
     Returns {"waiting_on": "start" | "tool" | "model", "detail": text}:
     "start" when the agent wrote no event at all, "tool" when a tool
-    call (a codex command, a claude tool use) was issued and never
+    call (a codex command, a claude tool use, a cursor tool_call) was
+    issued and never
     answered, naming the newest such call, else "model".
     """
     try:
@@ -932,6 +939,13 @@ def stall_point(log_path: Path) -> dict:
             pending[item["id"]] = f"command {' '.join(str(what).split())}"
         elif kind == "item.completed" and item.get("id"):
             pending.pop(item["id"], None)
+        elif kind == "tool_call" and obj.get("call_id"):
+            if obj.get("subtype") == "started":
+                from .telemetry import _describe, cursor_tool
+                name, args, _ = cursor_tool(obj)
+                pending[obj["call_id"]] = "tool " + _describe(name, args)
+            else:
+                pending.pop(obj["call_id"], None)
         message = obj.get("message")
         content = (message.get("content")
                    if isinstance(message, dict) else None)
@@ -1057,6 +1071,10 @@ def _run_review(config, change, worktree_dir, log_path, session,
                    else "gerrit-review")
     if log_path is None:
         log_path = run_log_path(config, change)
+    if config.agent == "cursor" and config.allowed_tools:
+        write_cursor_permissions(
+            worktree_dir, expand_allowed_tools(config, worktree_dir),
+            config.denied_tools)
     cmd = build_agent_cmd(config, change, session, worktree_dir)
     extra_env = {**get_agent(config.agent).env(config.lean), **config.env}
     stdin_path = None

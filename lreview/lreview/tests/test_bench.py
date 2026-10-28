@@ -210,6 +210,14 @@ def test_select_by_set():
         bench.select(cases, None, "nope")
 
 
+def test_cursor_offline_rules():
+    from lreview.bench import OFFLINE_COMMANDS, offline_rules
+    allow, deny = offline_rules()
+    assert allow == ["Shell(*)"]
+    assert "Shell(curl:*)" in deny and "Shell(jira:*)" in deny
+    assert len(deny) == len(OFFLINE_COMMANDS)
+
+
 def test_offline_env_shadows_network_commands(tmp_path):
     env = bench.offline_env(tmp_path)
     shims = tmp_path / "offline-bin"

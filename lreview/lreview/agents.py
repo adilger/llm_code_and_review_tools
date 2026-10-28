@@ -5,13 +5,14 @@ review-core.md directly (the review-prompts README quick-start form),
 so every backend receives the same instruction text — only the
 headless CLI invocation differs per agent.
 
-Claude and codex are the verified backends. Both are run with a JSONL
-event stream (claude's --output-format stream-json, codex's --json)
-that lreview parses for token usage; only claude's carries a dollar
-cost and the model name. gemini and opencode are best-effort command
-templates.
+Claude, codex and cursor are the verified backends. All three are run
+with a JSONL event stream (claude's and cursor's --output-format
+stream-json, codex's --json) that lreview parses for token usage;
+only claude's carries a dollar cost. auggie, gemini and opencode are
+best-effort command templates.
 """
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -58,6 +59,13 @@ class AgentSpec:
     # log grow during a run, so it doubles as the liveness signal.
     stream_json: bool = False
     verified: bool = True
+    # The executable, when it is not the backend's name (Cursor's CLI
+    # is "agent").
+    command: Optional[str] = None
+
+    @property
+    def binary(self) -> str:
+        return self.command or self.name
 
     def build_cmd(
         self,
@@ -72,16 +80,17 @@ class AgentSpec:
         prompt_on_stdin: bool = False,
         allowed_tools: Optional[list[str]] = None,
     ) -> list[str]:
-        # resume and settings are claude's: a session to fork and
-        # continue, and per-run settings (hooks). Other agents ignore
-        # both.  lean: see LEAN_CLAUDE_ARGS.
-        # allowed_tools, claude only: run with --permission-mode
-        # dontAsk and this allowlist in place of
-        # --dangerously-skip-permissions. The agent cannot use a tool
-        # that the list does not name, and nothing prompts.
+        # resume: a session to continue (claude forks it; cursor
+        # continues the chat itself). settings: claude's per-run
+        # settings (hooks). Other agents ignore both.  lean: see
+        # LEAN_CLAUDE_ARGS.
+        # allowed_tools, claude: run with --permission-mode dontAsk and
+        # this allowlist in place of --dangerously-skip-permissions.
+        # The agent cannot use a tool that the list does not name, and
+        # nothing prompts. cursor: see below.
         # effort: claude gets --effort; codex gets a config override
         # for model_reasoning_effort (Codex has no --effort flag).
-        # gemini/opencode ignore it (the CLI warns when dropped).
+        # gemini/opencode/cursor ignore it (the CLI warns when dropped).
         # extra_args come after so a later --agent-arg=-c can override.
         if self.name == "claude":
             cmd = ["claude", "-p", prompt_text]
@@ -104,8 +113,36 @@ class AgentSpec:
             if system_file:
                 cmd += ["--append-system-prompt-file", system_file]
             return cmd + extra_args
+        if self.name == "cursor":
+            # Like claude's stream-json, ending in a result event with
+            # camelCase usage and no cost. --trust skips the prompt for
+            # a workspace (each review's new worktree) not yet trusted;
+            # without it the run exits at once. The effort is part of
+            # the model slug (gpt-5.3-codex-high), so effort is unused.
+            # allowed_tools: the rules go in the worktree's
+            # .cursor/cli.json (write_cursor_permissions); the run drops
+            # --force, so a shell command no rule allows is rejected.
+            # The sandbox stays off: in the sandbox, Cursor runs every
+            # shell command whatever the rules say.
+            # --disable-indexing: never sync the worktree to Cursor's
+            # servers for search. A -p run skipped it in our tests
+            # (2026.10.22), but nothing documents that.
+            cmd = ["agent", "-p", "--output-format", "stream-json",
+                   "--trust", "--disable-indexing"]
+            if allowed_tools:
+                cmd += ["--sandbox", "disabled"]
+            else:
+                cmd += ["--force"]
+            if model:
+                cmd += ["--model", model]
+            # Continues that chat in place: cursor cannot fork one.
+            if resume:
+                cmd += ["--resume", resume]
+            # With no prompt argument, -p reads the prompt from stdin.
+            return cmd + extra_args + ([] if prompt_on_stdin
+                                       else [prompt_text])
         if allowed_tools:
-            raise ValueError("--allow-tool needs the claude agent")
+            raise ValueError("--allow-tool needs the claude or cursor agent")
         if self.name == "codex":
             # --json makes exec stream JSONL events (thread/turn/item)
             # instead of prose, ending in the turn.completed usage the
@@ -204,6 +241,12 @@ class AgentSpec:
             if effort:
                 cmd += ["--reasoning-effort", effort]
             return cmd + extra_args + [prompt_text]
+        if self.name == "cursor":
+            # Each chat runs in a new worktree, as a review does.
+            cmd = ["agent", "--trust", "--disable-indexing"]
+            if model:
+                cmd += ["--model", model]
+            return cmd + extra_args + [prompt_text]
         if self.name == "opencode":
             # The root command's positional argument is a project
             # PATH, not a prompt — the prompt goes in --prompt,
@@ -214,6 +257,23 @@ class AgentSpec:
                 cmd += ["--model", model]
             return cmd + extra_args + ["--prompt", prompt_text]
         raise ValueError(f"unknown agent {self.name}")
+
+
+def write_cursor_permissions(worktree: Path, rules: list[str],
+                             deny: tuple = ()) -> Path:
+    """Write the cursor allowlist where the agent reads it.
+
+    Cursor reads .cursor/cli.json in its workspace, beside the user's
+    ~/.cursor/cli-config.json. Only Shell, WebFetch and Mcp rules
+    gate a tool: the file tools run without an allow rule, and only a
+    deny rule stops them. A deny rule wins over every allow rule.
+    """
+    path = worktree / ".cursor" / "cli.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(
+        {"permissions": {"allow": rules, "deny": list(deny)}},
+        indent=2) + "\n")
+    return path
 
 
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9-]+")
@@ -232,6 +292,7 @@ AGENTS = {
     "claude": AgentSpec(name="claude", stream_json=True),
     "codex": AgentSpec(name="codex", stream_json=True),
     "auggie": AgentSpec(name="auggie", stream_json=True, verified=False),
+    "cursor": AgentSpec(name="cursor", stream_json=True, command="agent"),
     "gemini": AgentSpec(name="gemini", verified=False),
     "opencode": AgentSpec(name="opencode", verified=False),
 }

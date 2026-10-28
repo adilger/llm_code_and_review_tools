@@ -119,22 +119,36 @@ class TestAgentLogin:
 
     def test_claude_answering_is_logged_in(self):
         with self._run(0, '{"is_error": false, "result": "ok"}'):
-            ok, _ = check_agent_login("claude")
+            ok, _ = check_agent_login("claude", live=True)
         assert ok
 
     def test_claude_auth_failure_is_not_ready(self):
         """On PATH is not logged in: this is what a review then fails on."""
         out = '{"is_error": true, "result": "Invalid API key - Please run /login"}'
         with self._run(1, out):
-            ok, detail = check_agent_login("claude")
+            ok, detail = check_agent_login("claude", live=True)
         assert not ok
         assert "Invalid API key" in detail
 
     def test_claude_error_with_exit_zero_is_not_ready(self):
         with self._run(0, '{"is_error": true, "result": "authentication_failed"}'):
-            ok, detail = check_agent_login("claude")
+            ok, detail = check_agent_login("claude", live=True)
         assert not ok
         assert "authentication_failed" in detail
+
+    def test_claude_uses_auth_status(self):
+        out = '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}'
+        with self._run(0, out) as run:
+            ok, detail = check_agent_login("claude")
+        assert ok
+        assert detail == "logged in via claude.ai (max)"
+        assert run.call_args[0][0] == ["claude", "auth", "status", "--json"]
+
+    def test_claude_auth_status_logged_out(self):
+        with self._run(1, "Not logged in. Run claude auth login to authenticate."):
+            ok, detail = check_agent_login("claude")
+        assert not ok
+        assert detail.startswith("claude is not logged in: Not logged in")
 
     def test_codex_uses_login_status(self):
         with self._run(1, "", "Not logged in") as run:
@@ -142,6 +156,13 @@ class TestAgentLogin:
         assert not ok
         assert "Not logged in" in detail
         assert run.call_args[0][0] == ["codex", "login", "status"]
+
+    def test_cursor_uses_agent_status(self):
+        with self._run(0, "Logged in as someone@example.com") as run:
+            ok, detail = check_agent_login("cursor")
+        assert ok
+        assert "Logged in" in detail
+        assert run.call_args[0][0] == ["agent", "status"]
 
     def test_other_backends_are_not_checked(self):
         with patch("subprocess.run") as run:
@@ -151,7 +172,7 @@ class TestAgentLogin:
 
     def test_claude_ping_is_cheap(self):
         with self._run(0, '{"is_error": false, "result": "ok"}') as run:
-            check_agent_login("claude")
+            check_agent_login("claude", live=True)
         cmd = run.call_args[0][0]
         assert cmd[cmd.index("--model") + 1] == "haiku"
         assert cmd[cmd.index("--tools") + 1] == ""
@@ -162,13 +183,21 @@ class TestAgentLogin:
         out = ('{"is_error": true, "result": "Not logged in · '
                'Please run /login", "terminal_reason": "api_error"}')
         with self._run(1, out):
-            ok, detail = check_agent_login("claude")
+            ok, detail = check_agent_login("claude", live=True)
         assert not ok
         assert detail.startswith("claude is not logged in: Not logged in")
 
+    def test_claude_rejected_token_is_not_logged_in(self):
+        out = ('{"is_error": true, "result": "Failed to authenticate. '
+               'API Error: 401 Invalid authentication credentials"}')
+        with self._run(1, out):
+            ok, detail = check_agent_login("claude", live=True)
+        assert not ok
+        assert detail.startswith("claude is not logged in: Failed to authenticate")
+
     def test_claude_other_failure_is_not_called_a_login(self):
         with self._run(1, '{"is_error": true, "result": "Overloaded"}'):
-            ok, detail = check_agent_login("claude")
+            ok, detail = check_agent_login("claude", live=True)
         assert not ok
         assert detail == "claude did not answer a test prompt: Overloaded"
 
@@ -177,7 +206,7 @@ class TestAgentLogin:
 
         with patch("subprocess.run",
                    side_effect=subprocess.TimeoutExpired("claude", 30)):
-            ok, detail = check_agent_login("claude")
+            ok, detail = check_agent_login("claude", live=True)
         assert not ok
         assert detail == "claude did not answer in 30s"
 
@@ -227,3 +256,28 @@ class TestCmdCheck:
         rc, probe = self._check(["check", "--no-login"], (False, "x"))
         assert rc == 0
         probe.assert_not_called()
+
+
+class TestListAgents:
+
+    def test_states(self):
+        from lreview.doctor import list_agents
+        found = {"claude": "/bin/claude", "agent": "/bin/agent"}
+        logins = {"claude": (True, "logged in"),
+                  "cursor": (False, "cursor is not logged in")}
+        with patch("lreview.doctor.shutil.which", side_effect=found.get), \
+                patch("lreview.doctor.check_agent_login",
+                      side_effect=logins.get):
+            rows = {r[0]: r for r in list_agents()}
+        assert rows["claude"][2] == "ready"
+        assert rows["cursor"][2] == "not logged in"
+        assert rows["codex"][2] == "not installed"
+        assert rows["gemini"][1] is False
+
+    def test_no_login(self):
+        from lreview.doctor import list_agents
+        with patch("lreview.doctor.shutil.which", return_value="/bin/x"), \
+                patch("lreview.doctor.check_agent_login") as login:
+            rows = list_agents(login=False)
+        login.assert_not_called()
+        assert {r[2] for r in rows} == {"installed"}

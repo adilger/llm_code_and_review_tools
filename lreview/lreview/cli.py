@@ -25,7 +25,7 @@ from llm_tool_common.update_check import maybe_check_for_updates
 
 from . import __version__
 from .defaults import (
-    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL,
+    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL, CURSOR_DEFAULT_MODEL,
     DEFAULT_AGENT, DEFAULT_BENCH_JOBS, DEFAULT_JOBS, DEFAULT_LEAN,
     DEFAULT_MODE, DEFAULT_PREFIX, DEFAULT_PRELOAD, DEFAULT_RESULTS_DIRNAME,
     DEFAULT_STALL_RETRY, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT,
@@ -112,8 +112,8 @@ def resolve_model(agent: str, model: str = None) -> str:
     Explicit --model wins, then $LREVIEW_MODEL unless another agent's
     catalog lists that name: the variable is shared by every agent,
     and `codex -m opus` only fails. claude defaults to
-    sonnet and codex to gpt-6.1-sol,
-    gemini and opencode to whatever their own CLI defaults to.
+    sonnet, codex to gpt-6.1-sol and cursor to cursor-grok-4.6-high,
+    the others to whatever their own CLI defaults to.
 
     codex aliases are expanded to the slug the CLI expects, so
     `--model sol` runs — and is posted and recorded as —
@@ -254,7 +254,8 @@ def cmd_check(args) -> int:
     from .doctor import check_agent_login, check_gerrit
     status = check_prompts(explicit=args.prompts_dir, agent=args.agent)
     if status.agent_cli and not args.no_login:
-        login_ok, login_detail = check_agent_login(args.agent)
+        login_ok, login_detail = check_agent_login(
+            args.agent, live=args.live_login)
     else:
         login_ok, login_detail = True, "not checked"
     if args.github:
@@ -412,8 +413,8 @@ def cmd_run(args) -> int:
               "--local ref, or the checked-out HEAD)")
         return 1
 
-    if args.allow_tool and args.agent != "claude":
-        print("error: --allow-tool needs the claude agent")
+    if args.allow_tool and args.agent not in ("claude", "cursor"):
+        print("error: --allow-tool needs the claude or cursor agent")
         return 1
 
     prompts_status = ensure_prompts(args)
@@ -425,7 +426,7 @@ def cmd_run(args) -> int:
     from .agents import get_agent
     if not get_agent(args.agent).verified:
         print(f"note: the '{args.agent}' backend is best-effort and not "
-              "yet verified end-to-end; claude and codex are. Use "
+              "yet verified end-to-end; claude, codex and cursor are. Use "
               "--agent-arg to adjust flags if needed.")
     if not check_selection(args, resolve_model(args.agent, args.model)):
         return 1
@@ -818,6 +819,10 @@ def cmd_bench(args) -> int:
         print(f"error: {exc}")
         return 1
 
+    allow, deny = ([], [])
+    if args.offline and args.agent == "cursor":
+        allow, deny = bench.offline_rules()
+
     def config_for(results_dir: Path, repo: Path) -> BatchConfig:
         return BatchConfig(
             repo=repo, results_dir=results_dir,
@@ -829,6 +834,7 @@ def cmd_bench(args) -> int:
             memory_db=(label_dir / "db") if args.memory else None,
             resume=args.resume, lean=args.lean, preload=args.preload,
             env=bench.offline_env(bench_dir) if args.offline else {},
+            allowed_tools=allow, denied_tools=deny,
             agent_args=args.agent_arg or [])
     try:
         bench.run_bench(config_for, cases, label_dir, args.reps, repos,
@@ -854,7 +860,8 @@ def cmd_chat(args) -> int:
     from .agents import get_agent
     if not get_agent(args.agent).verified:
         print(f"note: the '{args.agent}' backend is best-effort and "
-              "not yet verified end-to-end; claude and codex are.")
+              "not yet verified end-to-end; claude, codex and cursor "
+              "are.")
     # chat passes --model alone, never a run default
     from .models import canonical_model
     model = canonical_model(args.agent, args.model)
@@ -879,7 +886,7 @@ def cmd_chat(args) -> int:
 def cmd_models(args) -> int:
     """Print what each agent will accept for --model and --effort."""
     from .models import (CLAUDE_EFFORTS, CLAUDE_DEFAULT_MODEL, CLAUDE_MODELS,
-                         codex_catalog_lines)
+                         codex_catalog_lines, cursor_model_lines)
     agents = [args.agent] if args.agent else ["claude", "codex"]
     for agent in agents:
         if agent == "claude":
@@ -891,12 +898,26 @@ def cmd_models(args) -> int:
         elif agent == "codex":
             print("codex")
             print("\n".join(codex_catalog_lines()))
+        elif agent == "cursor":
+            print("cursor")
+            print("\n".join(cursor_model_lines()))
         else:
             print(f"{agent}\n  models are the CLI's own; --effort is "
                   "not supported")
         print()
     print("Names not listed here are passed to the agent CLI unchanged.")
     return 0
+
+
+def cmd_agents(args) -> int:
+    """Print each backend and whether it can run a review now."""
+    from .doctor import list_agents
+    rows = list_agents(login=not args.no_login)
+    for name, verified, state, detail in rows:
+        tag = "" if verified else " (unverified)"
+        print(f"{name + tag:<22} {state:<14} {detail}")
+    ready = ("ready", "installed")
+    return 0 if any(row[2] in ready for row in rows) else 2
 
 
 def cmd_render(args) -> int:
@@ -988,11 +1009,13 @@ def build_parser() -> argparse.ArgumentParser:
             f"  -j, --jobs N     parallel reviews (default: {DEFAULT_JOBS})\n"
             f"  --mode NAME      full or light (default: {DEFAULT_MODE});\n"
             "                   light is one cheap focused pass\n"
-            f"  --agent NAME     claude, codex, gemini, opencode, auggie\n"
-            f"                   (default: {DEFAULT_AGENT})\n"
+            f"  --agent NAME     claude, codex, gemini, opencode, auggie,\n"
+            f"                   cursor (default: {DEFAULT_AGENT})\n"
             f"  --model NAME     claude: {CLAUDE_DEFAULT_MODEL} (default), opus, fable\n"
             f"                   codex: {CODEX_DEFAULT_MODEL} (default), astra, terra,\n"
             "                   luna, ... — see 'lreview models'\n"
+            f"                   cursor: {CURSOR_DEFAULT_MODEL} (default), ... —\n"
+            "                   see 'lreview models --agent cursor'\n"
             "  --effort LEVEL   low..max, ultra (codex, per model)\n"
             "  --post           post findings when the batch finishes\n"
             "  --prefix TEXT    posted-message prefix; <model> placeholder\n"
@@ -1049,7 +1072,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--prompts-dir", default=default_prompts, help=prompts_help)
     check_p.add_argument(
         "--no-login", action="store_true",
-        help="skip the login check (for claude, one prompt to haiku)")
+        help="skip the login check")
+    check_p.add_argument(
+        "--live-login", action="store_true",
+        help="check claude's login with one prompt to haiku (about "
+             "1.5 cents), not only the stored credential")
     check_p.add_argument("--github", action="store_true",
         help="check GitHub token (GH_TOKEN, falling back to GITHUB_TOKEN) instead of Gerrit")
     check_p.set_defaults(func=cmd_check)
@@ -1134,15 +1161,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--agent", choices=sorted(AGENTS), default=default_agent,
         help="Agent to run the reviews with (default: $LREVIEW_AGENT or "
-             "claude; claude and codex are the verified backends, "
-             "gemini and opencode are best-effort)")
+             "claude; claude, codex and cursor are the verified "
+             "backends, auggie, gemini and opencode are best-effort)")
     run_p.add_argument(
         "--model", default=None,
         help="Model for the review runs — claude: sonnet (default), opus, "
              "fable, haiku; codex: gpt-6.1-sol (default), "
              "gpt-6-sol, gpt-6-astra, gpt-5.6-sol/-terra/-luna, gpt-5.5, "
              "gpt-5.3-codex-spark, or their aliases (sol, astra, terra, "
-             "luna, spark). "
+             "luna, spark); cursor: cursor-grok-4.6-high (default) or any "
+             "'agent --list-models' slug. "
              "$LREVIEW_MODEL sets the default; 'lreview models' "
              "prints the codex table")
     run_p.add_argument(
@@ -1151,7 +1179,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reasoning effort for claude (--effort) or codex "
              "(-c model_reasoning_effort=...); default: "
              "$LREVIEW_EFFORT or the agent's own default. Ignored for "
-             "gemini/opencode. The ladder is per model — 'ultra' is "
+             "gemini/opencode/cursor (cursor model slugs carry the "
+             "effort). The ladder is per model — 'ultra' is "
              "codex-only, and gpt-5.5 / gpt-5.3-codex-spark stop at "
              "xhigh; see 'lreview models'")
     run_p.add_argument(
@@ -1185,8 +1214,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--preload", action=argparse.BooleanOptionalAction,
         default=_env_flag("LREVIEW_PRELOAD", DEFAULT_PRELOAD),
         help="Full mode: give the reviewer the protocol and the files it "
-             "always loads up front (claude: system prompt; codex: start "
-             "of the prompt) and the commit in its first message, instead "
+             "always loads up front (claude: system prompt; codex and "
+             "cursor: start of the prompt, on stdin) and the commit in its first message, instead "
              "of having it read them one call at a time (default: on; "
              "$LREVIEW_PRELOAD=0 turns it off)")
     run_p.add_argument(
@@ -1196,10 +1225,14 @@ def build_parser() -> argparse.ArgumentParser:
              "use --agent-arg=--flag for arguments starting with a dash)")
     run_p.add_argument(
         "--allow-tool", action="append", dest="allow_tool", metavar="RULE",
-        help="Claude agent: a permission rule, for example "
-             "'Bash(git log *)' (repeatable). With one or more rules the "
-             "review runs with --permission-mode dontAsk and only these "
-             "tools, in place of --dangerously-skip-permissions. "
+        help="claude or cursor agent: a permission rule in that "
+             "agent's syntax, for example 'Bash(git log *)' (claude) or "
+             "'Shell(git:log *)' (cursor) (repeatable). With one or more "
+             "rules claude runs with --permission-mode dontAsk and only "
+             "these tools, in place of --dangerously-skip-permissions; "
+             "cursor gets the rules in the worktree's .cursor/cli.json "
+             "and runs without --force, so it rejects a shell command no "
+             "rule allows (its file tools are not gated). "
              "{worktree} and {prompts} expand to the review worktree and "
              "the prompts directory: 'Edit(/{worktree}/**)'")
     run_p.add_argument(
@@ -1379,7 +1412,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reasoning effort for the session — claude "
              "(--effort) or codex (-c model_reasoning_effort=...); "
              "default: $LREVIEW_EFFORT or the agent's own default. "
-             "Ignored for gemini/opencode; see 'lreview models' for "
+             "Ignored for gemini/opencode/cursor; see 'lreview models' for "
              "the per-model ladders")
     chat_p.add_argument(
         "--keep-worktree", action="store_true",
@@ -1404,6 +1437,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent", choices=sorted(AGENTS), default=None,
         help="Show just this agent (default: claude and codex)")
     models_p.set_defaults(func=cmd_models)
+
+    agents_p = sub.add_parser(
+        "agents", help="List the agent backends and which are "
+                       "installed and logged in")
+    agents_p.add_argument(
+        "--no-login", action="store_true",
+        help="skip the login checks; check PATH only")
+    agents_p.set_defaults(func=cmd_agents)
 
     render_p = sub.add_parser(
         "render", help="Render existing review JSONs to Markdown reports")

@@ -34,6 +34,9 @@ AGENT_INSTALL = {
     "auggie": (
         "npm install -g @augmentcode/auggie\n"
         "  then run 'auggie login'"),
+    "cursor": (
+        "curl https://cursor.com/install -fsS | bash\n"
+        "  then run 'agent login'"),
 }
 
 
@@ -69,26 +72,32 @@ LOGIN_PROMPT = "Reply with the single word ok."
 # What claude and codex say when the account is not logged in or the
 # credential is refused.
 _AUTH_FAILURES = ("not logged in", "/login", "authentication_failed",
-                  "invalid api key", "oauth token")
+                  "failed to authenticate", "invalid api key", "oauth token")
 
 
-def check_agent_login(agent: str) -> Tuple[bool, str]:
+def check_agent_login(agent: str, live: bool = False) -> Tuple[bool, str]:
     """Verify the agent CLI is logged in, as a review would find it.
 
     Being on PATH says nothing about the login: a review then fails
-    authentication before producing anything. Claude is asked one turn
-    on haiku with no tools, about 1.5 cents; codex has "login status",
-    which spends nothing. The other backends are not checked.
+    authentication before producing anything. claude has "auth
+    status", codex "login status" and cursor "agent status", which
+    spend nothing. "auth status" reads the stored credential only, so
+    live=True asks claude one turn on haiku with no tools instead,
+    about 1.5 cents. The other backends are not checked.
     """
     import json
     import subprocess
 
-    if agent == "claude":
+    if agent == "claude" and not live:
+        cmd = ["claude", "auth", "status", "--json"]
+    elif agent == "claude":
         cmd = ["claude", "-p", LOGIN_PROMPT, "--output-format", "json",
                "--max-turns", "1", "--model", "haiku", "--tools", "",
                "--no-session-persistence"]
     elif agent == "codex":
         cmd = ["codex", "login", "status"]
+    elif agent == "cursor":
+        cmd = ["agent", "status"]
     else:
         return True, "login not checked for this backend"
     env = os.environ.copy()
@@ -103,6 +112,17 @@ def check_agent_login(agent: str) -> Tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, f"{agent} did not answer in {LOGIN_TIMEOUT}s"
     said = " ".join((done.stdout + " " + done.stderr).split())
+    if agent == "claude" and not live:
+        try:
+            status = json.loads(done.stdout)
+        except ValueError:
+            status = {}
+        if (done.returncode == 0 and isinstance(status, dict)
+                and status.get("loggedIn")):
+            how = status.get("authMethod") or "unknown method"
+            plan = status.get("subscriptionType")
+            return True, f"logged in via {how}" + (f" ({plan})" if plan else "")
+        return False, f"claude is not logged in: {said[-300:] or 'no status'}"
     if agent == "claude":
         try:
             result = json.loads(done.stdout)
@@ -121,6 +141,33 @@ def check_agent_login(agent: str) -> Tuple[bool, str]:
     if agent == "claude":
         return False, f"{agent} did not answer a test prompt: {said}"
     return False, f"{agent} login status failed: {said}"
+
+
+def agent_status(agent: str, login: bool = True) -> Tuple[str, str]:
+    """Return (state, detail) for one backend: "ready", "not logged
+    in", "not installed", or "installed" when the login is not
+    checked."""
+    binary = get_agent(agent).binary
+    path = shutil.which(binary)
+    if not path:
+        return "not installed", f"'{binary}' not on PATH"
+    if not login:
+        return "installed", path
+    ok, detail = check_agent_login(agent)
+    return ("ready" if ok else "not logged in"), detail
+
+
+def list_agents(login: bool = True) -> list:
+    """Return (agent, verified, state, detail) for every backend.
+    The login checks run in parallel; claude's takes a few seconds."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .agents import AGENTS
+
+    names = list(AGENTS)
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        states = list(pool.map(lambda n: agent_status(n, login), names))
+    return [(name, AGENTS[name].verified, state, detail)
+            for name, (state, detail) in zip(names, states)]
 
 
 def check_github() -> Tuple[bool, str]:
@@ -145,16 +192,16 @@ def run_setup(agent: str, prompts_dir: Optional[str]) -> int:
     interactive = sys.stdin.isatty()
     spec = get_agent(agent)
     print(f"lreview setup — agent: {agent}"
-          + ("" if spec.verified else " (best-effort backend; claude "
-             "and codex are the verified ones)"))
+          + ("" if spec.verified else " (best-effort backend; claude, "
+             "codex and cursor are the verified ones)"))
     print()
 
     # 1. Agent CLI
-    agent_cli = shutil.which(agent)
+    agent_cli = shutil.which(spec.binary)
     if agent_cli:
         _step(True, "agent CLI", agent_cli)
     else:
-        _step(False, "agent CLI", f"'{agent}' not found on PATH")
+        _step(False, "agent CLI", f"'{spec.binary}' not found on PATH")
         print("  install it with:")
         for line in AGENT_INSTALL[agent].splitlines():
             print(f"  {line}")
