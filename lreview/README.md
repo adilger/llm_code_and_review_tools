@@ -357,8 +357,8 @@ lreview bench report --judge DIR...                  # LLM-judged matching
    stops to ask for a login -- and a detached
    worktree is created per change (a lustre-release checkout is ~75 MB;
    worktrees share the object store). Worktrees go to
-   `<repo>/../ai_worktrees/lreview/` when an `ai_worktrees`
-   directory exists next to the repo, else under the results dir.
+   the `worktrees_dir` set in the config file (see Configuration),
+   else under the results dir.
 3. Up to `--jobs` (default 5) headless agent processes run the review
    prompt concurrently, one per worktree (worktree names carry the pid,
    so concurrent lreview invocations never collide). Full output of
@@ -800,3 +800,27 @@ Use `lreview check --github` to validate `GH_TOKEN`/`GITHUB_TOKEN`.
 The included `.github/workflows/lreview.yml` is intentionally a concrete template:
 replace its immutable revision placeholder. It uses `pull_request`, not
 `pull_request_target`, so fork PRs cannot access the Claude secret and are skipped.
+
+
+## Configuration
+
+Standing preferences live in a TOML file: `$LREVIEW_CONFIG`, else
+`~/.config/lreview/lreview-config.toml`. Copy `lreview-config.example.toml` to start.
+
+A key is the long name of a command line option without the dashes
+(`jobs`, `mode`, `stall-timeout`, `agent`, `model`, `effort`, `lean`,
+`prefix`, `results-dir`, `prompts-dir`, `agent-arg`, ...). A top-level
+key is the default for every command that has the option; a `[run]`,
+`[chat]`, `[post]` or `[stats]` table applies to that command only and
+wins. An unknown key, a bad value or an unknown section stops lreview
+with an error that names the file.
+
+Precedence: command line, then the option's environment variable
+(`$LREVIEW_AGENT` and so on), then the config file, then the built-in
+default. Options that name one invocation's targets (`--last`,
+`--since`, `--local`, `--dry-run`, ...) are not configurable. A boolean
+flag set to `true` (`post`, `memory`, `keep-worktrees`) cannot be turned
+off from the command line.
+
+`worktrees_dir` is also accepted. A relative path is relative to the
+parent of the source repo. Default: `<results-dir>/worktrees`.

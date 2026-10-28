@@ -1,0 +1,47 @@
+# lreview configuration. Copy to ~/.config/lreview/lreview-config.toml
+# (or point $LREVIEW_CONFIG at it).
+#
+# A key is the long name of a command line option, without the leading
+# dashes ("stall-timeout" or "stall_timeout"). A top-level key is the
+# default for every command that has the option. A [command] table
+# ([run], [chat], [post], [stats]) applies to that command only and wins.
+#
+# Precedence: command line, then the option's environment variable
+# (for example $LREVIEW_AGENT), then this file, then the built-in default.
+# Options that name one invocation's targets (--last, --since, --local,
+# --dry-run, ...) cannot be set here. A boolean flag set to true here
+# (post, memory, keep-worktrees, series) cannot be turned off per run.
+
+# Built-in defaults, defined in lreview/defaults.py. Update these lines
+# when you change a default there; tests/test_defaults.py checks them.
+# jobs = 5
+# mode = "full"            # or "light"
+# timeout = 7200
+# stall-timeout = 600
+# stall-retry = true
+# agent = "claude"
+# model = "sonnet"         # for the claude agent
+# lean = true
+# preload = true
+# prefix = "[AI review - <model>]"
+
+# --- Options whose default is computed or empty ---
+# The value shown is an example. The comment gives the behavior when
+# the option is not set.
+# effort = "high"                     # the agent's own default effort
+# results-dir = "~/lreview-results"   # lreview-results/ in the tools checkout
+# worktrees_dir = "worktrees/agent/lreview"   # <results-dir>/worktrees;
+#                                     # top level only
+# prompts-dir = "~/review-prompts"    # $REVIEW_PROMPTS_DIR, the bundled
+#                                     # submodule, then ~/review-prompts
+# keep-worktrees = false              # false
+# agent-arg = ["--some-flag"]         # none
+# allow-tool = ["Bash(git log *)"]    # none
+
+# [run]
+# post = false                        # false
+# memory = false                      # false
+# db = "~/lreview-db"                 # lreview-db/ in the tools checkout
+
+# [chat]
+# model = "opus"

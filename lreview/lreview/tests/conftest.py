@@ -29,3 +29,9 @@ def _keep_results_out_of_the_checkout(tmp_path, monkeypatch):
     lreview-results/ and lreview-db/, which hold real reviews."""
     monkeypatch.setenv("LREVIEW_RESULTS_DIR", str(tmp_path / "env-results"))
     monkeypatch.setenv("LREVIEW_DB", str(tmp_path / "env-db"))
+
+
+@pytest.fixture(autouse=True)
+def _ignore_users_config(tmp_path, monkeypatch):
+    """Tests must not read the developer's ~/.config/lreview/lreview-config.toml."""
+    monkeypatch.setenv("LREVIEW_CONFIG", str(tmp_path / "no-config.toml"))

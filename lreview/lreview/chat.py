@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from .defaults import DEFAULT_AGENT
 from .gerrit import LocalChange, ResolvedChange, change_ref
 from .manifest import read_summary
 from .runner import BatchConfig, artifact_tag, prepare_worktree
@@ -172,7 +173,7 @@ def run_chat(
     repo: Optional[Path] = None,
     worktrees_dir: Optional[Path] = None,
     db_dir: Optional[Path] = None,
-    agent: str = "claude",
+    agent: str = DEFAULT_AGENT,
     model: Optional[str] = None,
     effort: Optional[str] = None,
     agent_args: Optional[list[str]] = None,

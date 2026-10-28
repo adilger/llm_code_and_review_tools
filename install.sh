@@ -407,6 +407,15 @@ install_tools() {
 
     # Install lreview
     install_tool lreview "$SCRIPT_DIR/lreview"
+    # Seed the user's config once; never overwrite their edits.
+    local lreview_cfg="${LREVIEW_CONFIG:-$HOME/.config/lreview/lreview-config.toml}"
+    if [ -e "$lreview_cfg" ]; then
+        echo "  Keeping existing $lreview_cfg (not overwritten)"
+    else
+        mkdir -p "$(dirname "$lreview_cfg")" &&
+            cp "$SCRIPT_DIR/lreview/lreview-config.example.toml" "$lreview_cfg" &&
+            echo "  Wrote $lreview_cfg (edit it to set lreview defaults)"
+    fi
 
     # Install pw_cli
     # pw-cli's old name
@@ -559,6 +568,13 @@ uninstall_tools() {
 
     echo "Removing Claude skills..."
     uninstall_skills
+
+    local lreview_cfg="${LREVIEW_CONFIG:-$HOME/.config/lreview/lreview-config.toml}"
+    if [ -e "$lreview_cfg" ]; then
+        echo ""
+        echo "Kept your lreview config: $lreview_cfg"
+        echo "  Remove it yourself if you no longer want it."
+    fi
 
     echo ""
     echo -e "${GREEN}✓${NC} Python tools uninstalled"

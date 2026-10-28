@@ -24,10 +24,15 @@ from pathlib import Path
 from llm_tool_common.update_check import maybe_check_for_updates
 
 from . import __version__
+from .defaults import (
+    CLAUDE_DEFAULT_MODEL, CODEX_DEFAULT_MODEL,
+    DEFAULT_AGENT, DEFAULT_BENCH_JOBS, DEFAULT_JOBS, DEFAULT_LEAN,
+    DEFAULT_MODE, DEFAULT_PREFIX, DEFAULT_PRELOAD, DEFAULT_RESULTS_DIRNAME,
+    DEFAULT_STALL_RETRY, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT,
+    DEFAULT_WORKTREES_DIRNAME)
 from .gerrit import resolve_change
 from .poster import post_results
 from .runner import (
-    DEFAULT_STALL_TIMEOUT,
     BatchConfig,
     STATUS_CLEAN,
     STATUS_FINDINGS,
@@ -60,7 +65,7 @@ def default_stall_timeout() -> int:
         return DEFAULT_STALL_TIMEOUT
 
 
-def _env_flag(name: str, default: bool = True) -> bool:
+def _env_flag(name: str, default: bool) -> bool:
     value = os.environ.get(name, "").strip().lower()
     if not value:
         return default
@@ -81,16 +86,24 @@ def default_results_dir() -> str:
         return env
     from .prompts import _REPO_ROOT
     if (_REPO_ROOT / ".git").exists():
-        return str(_REPO_ROOT / "lreview-results")
-    return "./lreview-results"
+        return str(_REPO_ROOT / DEFAULT_RESULTS_DIRNAME)
+    return f"./{DEFAULT_RESULTS_DIRNAME}"
 
 
 def default_worktrees_dir(repo: Path, results_dir: Path) -> Path:
-    """Prefer the workspace ai_worktrees/ convention when present."""
-    ai_worktrees = repo.resolve().parent / "ai_worktrees"
-    if ai_worktrees.is_dir():
-        return ai_worktrees / "lreview"
-    return results_dir / "worktrees"
+    """Use worktrees_dir from the config file, else <results-dir>/worktrees."""
+    from .config import load_config
+    configured = load_config().get("worktrees_dir")
+    if configured is not None:
+        if not isinstance(configured, str):
+            raise SystemExit("error: worktrees_dir in the config file "
+                             "must be a string")
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = repo.resolve().parent / path
+        path = path.resolve()
+        return path
+    return results_dir / DEFAULT_WORKTREES_DIRNAME
 
 
 def resolve_model(agent: str, model: str = None) -> str:
@@ -960,9 +973,9 @@ def _add_stall_options(parser) -> None:
              f"{DEFAULT_STALL_TIMEOUT})")
     parser.add_argument(
         "--stall-retry", action=argparse.BooleanOptionalAction,
-        default=True,
+        default=DEFAULT_STALL_RETRY,
         help="Start a stalled review once more before reporting it "
-             "stalled (default: on)")
+             f"stalled (default: {'on' if DEFAULT_STALL_RETRY else 'off'})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -972,18 +985,19 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "key run options (full list: lreview run -h):\n"
-            "  -j, --jobs N     parallel reviews (default: 5)\n"
-            "  --mode NAME      full (default) or light — one cheap\n"
-            "                   focused pass instead of the deep dive\n"
-            "  --agent NAME     claude (default), codex, gemini, opencode, auggie\n"
-            "  --model NAME     claude: sonnet (default), opus, fable\n"
-            "                   codex: gpt-6.1-sol (default), astra, terra,\n"
+            f"  -j, --jobs N     parallel reviews (default: {DEFAULT_JOBS})\n"
+            f"  --mode NAME      full or light (default: {DEFAULT_MODE});\n"
+            "                   light is one cheap focused pass\n"
+            f"  --agent NAME     claude, codex, gemini, opencode, auggie\n"
+            f"                   (default: {DEFAULT_AGENT})\n"
+            f"  --model NAME     claude: {CLAUDE_DEFAULT_MODEL} (default), opus, fable\n"
+            f"                   codex: {CODEX_DEFAULT_MODEL} (default), astra, terra,\n"
             "                   luna, ... — see 'lreview models'\n"
             "  --effort LEVEL   low..max, ultra (codex, per model)\n"
             "  --post           post findings when the batch finishes\n"
             "  --prefix TEXT    posted-message prefix; <model> placeholder\n"
-            "                   (default: '[AI review - <model>]')\n"
-            "  --timeout SECS   per-review limit (default: 7200)\n"
+            f"                   (default: '{DEFAULT_PREFIX}')\n"
+            f"  --timeout SECS   per-review limit (default: {DEFAULT_TIMEOUT})\n"
             "  --stall-timeout SECS  end a review whose agent writes\n"
             "                   nothing for SECS, and run it once more\n"
             f"                   (default: {DEFAULT_STALL_TIMEOUT})\n"
@@ -1008,7 +1022,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .agents import AGENTS
     from .models import EFFORT_LEVELS
     default_prefix = os.environ.get("LREVIEW_PREFIX")
-    default_agent = os.environ.get("LREVIEW_AGENT", "claude")
+    default_agent = os.environ.get("LREVIEW_AGENT", DEFAULT_AGENT)
     default_prompts = os.environ.get("REVIEW_PROMPTS_DIR") or None
     prompts_help = (
         "Path to the review-prompts clone (repo root or its kernel/ "
@@ -1069,7 +1083,7 @@ def build_parser() -> argparse.ArgumentParser:
              "(branches/SHAs) of --repo — each reviewed in its own "
              "worktree. Local results are not postable to Gerrit.")
     run_p.add_argument(
-        "--mode", choices=["full", "light"], default="full",
+        "--mode", choices=["full", "light"], default=DEFAULT_MODE,
         help="Review depth: 'full' (default) runs the review-prompts "
              "review-core.md deep-dive pipeline unchanged; 'light' "
              "runs the bundled single-pass light review (code + "
@@ -1096,11 +1110,12 @@ def build_parser() -> argparse.ArgumentParser:
              "FILE (default with --last: "
              "<results-dir>/review-last<N>.txt)")
     run_p.add_argument(
-        "--jobs", "-j", type=_positive_int, default=5,
-        help="Maximum parallel reviews (default: 5)")
+        "--jobs", "-j", type=_positive_int,
+        default=DEFAULT_JOBS,
+        help=f"Maximum parallel reviews (default: {DEFAULT_JOBS})")
     run_p.add_argument(
-        "--timeout", type=int, default=7200,
-        help="Per-review timeout in seconds (default: 7200)")
+        "--timeout", type=int, default=DEFAULT_TIMEOUT,
+        help=f"Per-review timeout in seconds (default: {DEFAULT_TIMEOUT})")
     _add_stall_options(run_p)
     run_p.add_argument(
         "--results-dir", default=default_results_dir(),
@@ -1111,8 +1126,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--worktrees-dir", default=None,
         help="Where review worktrees are created (default: "
-             "<repo>/../ai_worktrees/lreview if ai_worktrees exists, "
-             "else <results-dir>/worktrees)")
+             "worktrees_dir from the config file, else "
+             "<results-dir>/worktrees)")
     run_p.add_argument(
         "--keep-worktrees", action="store_true",
         help="Do not remove worktrees after each review")
@@ -1161,14 +1176,14 @@ def build_parser() -> argparse.ArgumentParser:
              "lreview-db/ in this repository — gitignored)")
     run_p.add_argument(
         "--lean", action=argparse.BooleanOptionalAction,
-        default=_env_flag("LREVIEW_LEAN"),
+        default=_env_flag("LREVIEW_LEAN", DEFAULT_LEAN),
         help="Start the reviewer with only what a review uses -- claude: "
              "six tools, no MCP servers, skills or CLAUDE.md, a 5-minute "
              "prompt cache; codex: unused features off (default: on; "
              "$LREVIEW_LEAN=0 turns it off)")
     run_p.add_argument(
         "--preload", action=argparse.BooleanOptionalAction,
-        default=_env_flag("LREVIEW_PRELOAD"),
+        default=_env_flag("LREVIEW_PRELOAD", DEFAULT_PRELOAD),
         help="Full mode: give the reviewer the protocol and the files it "
              "always loads up front (claude: system prompt; codex: start "
              "of the prompt) and the commit in its first message, instead "
@@ -1239,8 +1254,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=None,
         help="A lustre-release checkout to fetch case commits from "
              "(fast); else they come from Gerrit")
-    bench_run.add_argument("--jobs", "-j", type=_positive_int, default=4)
-    bench_run.add_argument("--timeout", type=int, default=7200)
+    bench_run.add_argument("--jobs", "-j", type=_positive_int,
+                           default=DEFAULT_BENCH_JOBS)
+    bench_run.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     _add_stall_options(bench_run)
     bench_run.add_argument("--agent", choices=sorted(AGENTS),
                            default=default_agent)
@@ -1248,11 +1264,11 @@ def build_parser() -> argparse.ArgumentParser:
     bench_run.add_argument("--effort", choices=list(EFFORT_LEVELS),
                            default=os.environ.get("LREVIEW_EFFORT"))
     bench_run.add_argument("--mode", choices=["full", "light"],
-                           default="full")
+                           default=DEFAULT_MODE)
     bench_run.add_argument("--lean", action=argparse.BooleanOptionalAction,
-                           default=_env_flag("LREVIEW_LEAN"))
+                           default=_env_flag("LREVIEW_LEAN", DEFAULT_LEAN))
     bench_run.add_argument("--preload", action=argparse.BooleanOptionalAction,
-                           default=_env_flag("LREVIEW_PRELOAD"))
+                           default=_env_flag("LREVIEW_PRELOAD", DEFAULT_PRELOAD))
     bench_run.add_argument(
         "--memory", "-m", action="store_true",
         help="Review memory: each rep is a round that reads the notes "
@@ -1422,6 +1438,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show findings that would be posted without contacting a provider")
     post_p.set_defaults(func=cmd_post)
 
+    from .config import apply_config
+    apply_config(sub.choices)
     return parser
 
 

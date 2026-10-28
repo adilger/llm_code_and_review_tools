@@ -23,6 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .defaults import DEFAULT_AGENT
+
 # $ per million tokens: input, 5m cache write, 1h cache write, cache
 # read, output.  A model missing here is priced from the run's own
 # result event (its total is exact; the split is then left out).
@@ -188,7 +190,7 @@ class ToolUse:
 @dataclass
 class Telemetry:
     log: str
-    agent: str = "claude"
+    agent: str = DEFAULT_AGENT
     model: str = ""
     session_id: Optional[str] = None
     version: Optional[str] = None

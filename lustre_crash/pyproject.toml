@@ -34,6 +34,7 @@ include = ["lustre_crash*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = ["integration: needs a live system"]
 
 [tool.ruff]
 line-length = 100
