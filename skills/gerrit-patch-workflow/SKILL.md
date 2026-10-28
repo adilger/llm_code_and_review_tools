@@ -86,7 +86,10 @@ gc push <change-id>
 ```
 
 `gc push` posts staged **comment replies**. It does not push commits;
-`gc upload` does -- see "Uploading a patchset" below.
+`gc upload` does -- see "Uploading a patchset" below. However many
+patchsets the threads are on, the replies are published as one
+message. Push refuses while the account has other drafts on the change
+(publishing would take them along); say so rather than deleting them.
 
 Or write the replies to a file and post them together -- one review, one
 mail to everyone on the change, instead of one per reply:

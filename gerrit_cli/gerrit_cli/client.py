@@ -481,6 +481,21 @@ class GerritCommentsClient:
         """
         return self.rest.get(f"/changes/{change_number}/drafts")
 
+    def create_draft(self, change_number: int, revision_id: str,
+                     comment: dict[str, Any]) -> dict[str, Any]:
+        """Create a draft comment (a CommentInput with "path") on a
+        revision; returns the CommentInfo, whose "id" names the draft."""
+        return self.rest.put(
+            f"/changes/{change_number}/revisions/{revision_id}/drafts",
+            json=comment,
+        )
+
+    def delete_draft(self, change_number: int, revision_id: str,
+                     draft_id: str) -> None:
+        """Delete one of the logged-in account's draft comments."""
+        self.rest.delete(
+            f"/changes/{change_number}/revisions/{revision_id}/drafts/{draft_id}")
+
     def publish_drafts(self, change_number: int) -> dict[str, Any]:
         """Publish every draft comment of the logged-in account on the
         change, on all patch sets.

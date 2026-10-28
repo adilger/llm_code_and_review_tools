@@ -580,18 +580,48 @@ class TestConvenienceFunctions:
 
 
 class TestPushStaged:
-    """Tests for push_staged method."""
+    """push_staged: one draft per reply on its parent's patchset, then a
+    single publish, so the replies make one Gerrit message."""
+
+    @staticmethod
+    def _setup(mock_staging_class, mock_client_class, operations,
+               comments=None, drafts=None):
+        from gerrit_cli.staging import StagedPatch
+
+        client = MagicMock()
+        client.get_change_detail.return_value = {
+            "current_revision": "ps3sha",
+            "revisions": {"ps1sha": {"_number": 1}, "ps2sha": {"_number": 2},
+                          "ps3sha": {"_number": 3}},
+        }
+        client.get_comments.return_value = comments or {}
+        client.get_drafts.return_value = drafts or {}
+        client.create_draft.side_effect = (
+            lambda change, revision, comment: {"id": f"d-{comment['message']}"})
+        mock_client_class.return_value = client
+        staged = StagedPatch(change_number=12345,
+                             change_url="https://example.com/12345",
+                             patchset=3, operations=list(operations))
+        staging = MagicMock()
+        staging.load_staged.return_value = staged
+        mock_staging_class.return_value = staging
+        return client, staging, staged
+
+    @staticmethod
+    def _op(index, message, comment_id, resolve=True, line=10):
+        from gerrit_cli.staging import StagedOperation
+        return StagedOperation(thread_index=index, file_path="test.c",
+                               line=line, message=message, resolve=resolve,
+                               comment_id=comment_id)
 
     @patch("gerrit_cli.replier.GerritCommentsClient")
     @patch("gerrit_cli.replier.StagingManager")
     def test_push_staged_no_operations(self, mock_staging_class, mock_client_class):
-        """Test push_staged with no staged operations."""
         mock_staging = MagicMock()
         mock_staging.load_staged.return_value = None
         mock_staging_class.return_value = mock_staging
 
-        replier = CommentReplier()
-        success, msg, count = replier.push_staged(12345)
+        success, msg, count = CommentReplier().push_staged(12345)
 
         assert success is False
         assert "No staged operations" in msg
@@ -599,253 +629,209 @@ class TestPushStaged:
 
     @patch("gerrit_cli.replier.GerritCommentsClient")
     @patch("gerrit_cli.replier.StagingManager")
-    def test_push_staged_success_with_resolve(
-        self, mock_staging_class, mock_client_class
-    ):
-        """Test push_staged correctly sets unresolved=False for resolved comments."""
-        from gerrit_cli.staging import StagedOperation, StagedPatch
-
-        mock_client = MagicMock()
-        mock_client.get_change_detail.return_value = {
-            "current_revision": "abc123",
-            "revisions": {"abc123": {"_number": 5}},
-        }
-        mock_client_class.return_value = mock_client
-
-        # Create staged operations - one resolved, one not
-        staged = StagedPatch(
-            change_number=12345,
-            change_url="https://example.com/12345",
-            patchset=5,
-            operations=[
-                StagedOperation(
-                    thread_index=0,
-                    file_path="test.c",
-                    line=10,
-                    message="Done",
-                    resolve=True,  # Should set unresolved=False
-                    comment_id="id1",
-                ),
-                StagedOperation(
-                    thread_index=1,
-                    file_path="test.c",
-                    line=20,
-                    message="Looking into this",
-                    resolve=False,  # Should set unresolved=True
-                    comment_id="id2",
-                ),
-            ],
-        )
-
-        mock_staging = MagicMock()
-        mock_staging.load_staged.return_value = staged
-        mock_staging_class.return_value = mock_staging
-
-        replier = CommentReplier()
-        success, msg, count = replier.push_staged(12345)
-
-        assert success is True
-        assert count == 2
-
-        # Verify post_review was called with correct unresolved flags
-        mock_client.post_review.assert_called_once()
-        call_args = mock_client.post_review.call_args
-        comments = call_args.kwargs.get("comments") or call_args[1].get("comments")
-
-        # Both comments are in test.c
-        assert "test.c" in comments
-        test_comments = comments["test.c"]
-        assert len(test_comments) == 2
-
-        # First comment should be resolved (unresolved=False)
-        resolved_comment = next(c for c in test_comments if c["message"] == "Done")
-        assert resolved_comment["unresolved"] is False
-
-        # Second comment should not be resolved (unresolved=True)
-        unresolved_comment = next(
-            c for c in test_comments if c["message"] == "Looking into this"
-        )
-        assert unresolved_comment["unresolved"] is True
-
-    @patch("gerrit_cli.replier.GerritCommentsClient")
-    @patch("gerrit_cli.replier.StagingManager")
     def test_push_staged_dry_run(self, mock_staging_class, mock_client_class):
-        """Test push_staged dry_run mode."""
-        from gerrit_cli.staging import StagedOperation, StagedPatch
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class, [self._op(0, "Done", "id1")])
 
-        mock_client = MagicMock()
-        mock_client.get_change_detail.return_value = {
-            "current_revision": "abc123",
-            "revisions": {"abc123": {"_number": 5}},
-        }
-        mock_client_class.return_value = mock_client
-
-        staged = StagedPatch(
-            change_number=12345,
-            change_url="https://example.com/12345",
-            patchset=5,
-            operations=[
-                StagedOperation(
-                    thread_index=0,
-                    file_path="test.c",
-                    line=10,
-                    message="Done",
-                    resolve=True,
-                    comment_id="id1",
-                ),
-            ],
-        )
-
-        mock_staging = MagicMock()
-        mock_staging.load_staged.return_value = staged
-        mock_staging_class.return_value = mock_staging
-
-        replier = CommentReplier()
-        success, msg, count = replier.push_staged(12345, dry_run=True)
+        success, msg, count = CommentReplier().push_staged(12345, dry_run=True)
 
         assert success is True
-        assert "Would push" in msg
-        assert "RESOLVE" in msg  # Should indicate resolve action
-        # Should NOT actually call post_review in dry run
-        mock_client.post_review.assert_not_called()
+        assert "Would push" in msg and "RESOLVE" in msg
+        client.create_draft.assert_not_called()
+        client.publish_drafts.assert_not_called()
 
     @patch("gerrit_cli.replier.GerritCommentsClient")
     @patch("gerrit_cli.replier.StagingManager")
-    def test_push_staged_clears_after_success(
-        self, mock_staging_class, mock_client_class
-    ):
-        """Test push_staged clears staged operations after success."""
-        from gerrit_cli.staging import StagedOperation, StagedPatch
-
-        mock_client = MagicMock()
-        mock_client.get_change_detail.return_value = {
-            "current_revision": "abc123",
-            "revisions": {"abc123": {"_number": 5}},
-        }
-        mock_client_class.return_value = mock_client
-
-        staged = StagedPatch(
-            change_number=12345,
-            change_url="https://example.com/12345",
-            patchset=5,
-            operations=[
-                StagedOperation(
-                    thread_index=0,
-                    file_path="test.c",
-                    line=10,
-                    message="Done",
-                    resolve=True,
-                    comment_id="id1",
-                ),
-            ],
-        )
-
-        mock_staging = MagicMock()
-        mock_staging.load_staged.return_value = staged
-        mock_staging_class.return_value = mock_staging
-
-        replier = CommentReplier()
-        success, msg, count = replier.push_staged(12345)
-
-        assert success is True
-        mock_staging.clear_staged.assert_called_once_with(12345)
-
-    @patch("gerrit_cli.replier.GerritCommentsClient")
-    @patch("gerrit_cli.replier.StagingManager")
-    def test_push_staged_api_error(self, mock_staging_class, mock_client_class):
-        """Test push_staged handles API errors."""
-        from gerrit_cli.staging import StagedOperation, StagedPatch
-
-        mock_client = MagicMock()
-        mock_client.get_change_detail.return_value = {
-            "current_revision": "abc123",
-            "revisions": {"abc123": {"_number": 5}},
-        }
-        mock_client.post_review.side_effect = Exception("API Error")
-        mock_client_class.return_value = mock_client
-
-        staged = StagedPatch(
-            change_number=12345,
-            change_url="https://example.com/12345",
-            patchset=5,
-            operations=[
-                StagedOperation(
-                    thread_index=0,
-                    file_path="test.c",
-                    line=10,
-                    message="Done",
-                    resolve=True,
-                    comment_id="id1",
-                ),
-            ],
-        )
-
-        mock_staging = MagicMock()
-        mock_staging.load_staged.return_value = staged
-        mock_staging_class.return_value = mock_staging
-
-        replier = CommentReplier()
-        success, msg, count = replier.push_staged(12345)
-
-        assert success is False
-        assert "Error" in msg
-        # Should NOT clear staged operations on failure
-        mock_staging.clear_staged.assert_not_called()
-
-    @patch("gerrit_cli.replier.GerritCommentsClient")
-    @patch("gerrit_cli.replier.StagingManager")
-    def test_push_staged_replies_on_each_parents_patchset(
-        self, mock_staging_class, mock_client_class
-    ):
-        """A reply staged on PS2 and pushed after PS3 goes on PS2, at the
-        parent's line and range; one the change no longer has goes on PS3.
-        When the second review fails, only its replies stay staged."""
-        from gerrit_cli.staging import StagedOperation, StagedPatch
-
+    def test_replies_on_several_patchsets_publish_once(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        """Each reply is drafted on its parent's patchset, at the parent's
+        line and range; a parent the change no longer has means the
+        current patchset. Then one publish, and the staging is cleared."""
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
         span = {"start_line": 8, "start_character": 0,
                 "end_line": 10, "end_character": 3}
-        mock_client = MagicMock()
-        mock_client.get_change_detail.return_value = {
-            "current_revision": "ps3sha",
-            "revisions": {"ps2sha": {"_number": 2}, "ps3sha": {"_number": 3}},
-        }
-        mock_client.get_comments.return_value = {
-            "test.c": [{"id": "id1", "patch_set": 2, "line": 10, "range": span}],
-        }
-        mock_client.post_review.side_effect = [{}, Exception("API Error")]
-        mock_client_class.return_value = mock_client
-
-        first = StagedOperation(
-            thread_index=0, file_path="test.c", line=10, message="Done",
-            resolve=True, comment_id="id1",
-        )
-        second = StagedOperation(
-            thread_index=1, file_path="test.c", line=20, message="Why?",
-            resolve=False, comment_id="gone",
-        )
-        staged = StagedPatch(
-            change_number=12345, change_url="https://example.com/12345",
-            patchset=2, operations=[first, second],
-        )
-        mock_staging = MagicMock()
-        mock_staging.load_staged.return_value = staged
-        mock_staging_class.return_value = mock_staging
+        comments = {"test.c": [
+            {"id": "id1", "patch_set": 1, "line": 10, "range": span},
+            {"id": "id2", "patch_set": 2, "line": 20},
+        ]}
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1"),
+             self._op(1, "Why?", "id2", resolve=False, line=20),
+             self._op(2, "Gone", "gone", line=30)],
+            comments=comments)
 
         success, msg, count = CommentReplier().push_staged(12345)
 
-        posts = [
-            (c.kwargs["revision_id"], c.kwargs["comments"])
-            for c in mock_client.post_review.call_args_list
+        assert success is True and count == 3
+        drafts = [(c.args[1], c.args[2]) for c in client.create_draft.call_args_list]
+        assert drafts == [
+            ("ps1sha", {"path": "test.c", "in_reply_to": "id1",
+                        "message": "Done", "unresolved": False,
+                        "line": 10, "range": span}),
+            ("ps2sha", {"path": "test.c", "in_reply_to": "id2",
+                        "message": "Why?", "unresolved": True, "line": 20}),
+            ("ps3sha", {"path": "test.c", "in_reply_to": "gone",
+                        "message": "Gone", "unresolved": False, "line": 30}),
         ]
-        assert posts == [
-            ("ps2sha", {"test.c": [{"in_reply_to": "id1", "message": "Done",
-                                    "unresolved": False, "line": 10,
-                                    "range": span}]}),
-            ("ps3sha", {"test.c": [{"in_reply_to": "gone", "message": "Why?",
-                                    "unresolved": True, "line": 20}]}),
-        ]
+        client.publish_drafts.assert_called_once_with(12345)
+        client.post_review.assert_not_called()
+        staging.clear_staged.assert_called_once_with(12345)
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_existing_drafts_are_not_published_with_the_replies(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1")],
+            drafts={"lustre/llite/file.c": [{"id": "x", "line": 42}]})
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
         assert success is False
-        assert "1 of 2 were posted" in msg
-        mock_staging.clear_staged.assert_not_called()
-        [saved] = mock_staging.save_staged.call_args[0]
-        assert saved.operations == [second]
+        assert "lustre/llite/file.c:42" in msg
+        client.create_draft.assert_not_called()
+        client.publish_drafts.assert_not_called()
+        client.delete_draft.assert_not_called()
+        staging.clear_staged.assert_not_called()
+        staging.save_staged.assert_not_called()
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_drafts_mode_creates_drafts_and_publishes_nothing(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        monkeypatch.setenv("GERRIT_CLI_MODE", "drafts")
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1"), self._op(1, "Ok", "id2")],
+            drafts={"other.c": [{"id": "x", "line": 1}]})
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is True
+        assert client.create_draft.call_count == 2
+        client.publish_drafts.assert_not_called()
+        assert "GERRIT_CLI_MODE=drafts" in msg and "not published" in msg
+        client.delete_draft.assert_not_called()
+        staging.clear_staged.assert_called_once_with(12345)
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_a_failed_draft_removes_the_drafts_already_made(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1"), self._op(1, "Ok", "id2")])
+        client.create_draft.side_effect = [{"id": "d1"}, Exception("API Error")]
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is False and "API Error" in msg
+        assert "all 2 are still staged" in msg
+        client.delete_draft.assert_called_once_with(12345, "ps3sha", "d1")
+        client.publish_drafts.assert_not_called()
+        staging.clear_staged.assert_not_called()
+        staging.save_staged.assert_not_called()
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_a_failed_publish_removes_the_drafts(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1"), self._op(1, "Ok", "id2")])
+        client.publish_drafts.side_effect = Exception("API Error")
+        ours = {"test.c": [{"id": "d-Done", "line": 10},
+                           {"id": "d-Ok", "line": 10}]}
+        client.get_drafts.side_effect = [{}, ours, ours]
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is False
+        assert sorted(c.args[2] for c in client.delete_draft.call_args_list) \
+            == ["d-Done", "d-Ok"]
+        staging.clear_staged.assert_not_called()
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_a_failing_draft_check_creates_nothing(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class, [self._op(0, "Done", "id1")])
+        client.get_drafts.side_effect = Exception("API Error")
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is False and "still staged" in msg
+        client.create_draft.assert_not_called()
+        client.publish_drafts.assert_not_called()
+        staging.clear_staged.assert_not_called()
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_a_draft_saved_during_the_push_is_not_published(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        """A draft of the user's that appears between the check and the
+        publish: the push refuses, removes its own drafts, keeps theirs."""
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class, [self._op(0, "Done", "id1")])
+        client.get_drafts.side_effect = [
+            {},
+            {"test.c": [{"id": "d-Done", "line": 10}],
+             "other.c": [{"id": "theirs", "line": 7}]},
+        ]
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is False and "other.c:7" in msg
+        client.publish_drafts.assert_not_called()
+        client.delete_draft.assert_called_once_with(12345, "ps3sha", "d-Done")
+        staging.clear_staged.assert_not_called()
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_a_publish_whose_answer_was_lost_counts_as_done(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        """The publish raised, but the push's drafts are gone: Gerrit
+        published them. Clearing the staging keeps a re-push from
+        posting the replies twice."""
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class,
+            [self._op(0, "Done", "id1"), self._op(1, "Ok", "id2")])
+        client.publish_drafts.side_effect = TimeoutError("read timed out")
+        client.get_drafts.side_effect = [
+            {}, {"test.c": [{"id": "d-Done"}, {"id": "d-Ok"}]}, {}]
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is True and count == 2
+        client.delete_draft.assert_not_called()
+        staging.clear_staged.assert_called_once_with(12345)
+
+    @patch("gerrit_cli.replier.GerritCommentsClient")
+    @patch("gerrit_cli.replier.StagingManager")
+    def test_an_unverifiable_publish_leaves_everything_in_place(
+            self, mock_staging_class, mock_client_class, monkeypatch):
+        """Neither the publish nor the check answered: the drafts stay
+        (a re-push then refuses on them, so nothing is posted twice) and
+        so do the staged replies."""
+        monkeypatch.delenv("GERRIT_CLI_MODE", raising=False)
+        client, staging, _ = self._setup(
+            mock_staging_class, mock_client_class, [self._op(0, "Done", "id1")])
+        client.publish_drafts.side_effect = TimeoutError("read timed out")
+        client.get_drafts.side_effect = [
+            {}, {"test.c": [{"id": "d-Done"}]}, TimeoutError("again")]
+
+        success, msg, count = CommentReplier().push_staged(12345)
+
+        assert success is False
+        assert "could not tell" in msg
+        client.delete_draft.assert_not_called()
+        staging.clear_staged.assert_not_called()

@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from .client import GerritCommentsClient
+from .mode import MODE_DRAFTS, MODE_ENV_VAR, is_drafts_mode
 from .models import Author, Comment, CommentThread, ExtractedComments, ReplyResult
 from .staging import StagingManager
 
@@ -30,6 +31,15 @@ def _reply_revisions(change, patch_sets) -> list[str]:
         if isinstance(info, dict)
     }
     return [by_number.get(patch_set, current) for patch_set in patch_sets]
+
+
+def _draft_labels(drafts: Optional[dict]) -> list[tuple[Any, str]]:
+    """(draft id, "path:line") for a get_drafts() answer."""
+    return [
+        (draft.get("id"), f"{path}:{draft.get('line', 'patchset')}")
+        for path, path_drafts in (drafts or {}).items()
+        for draft in path_drafts
+    ]
 
 
 def _reply_input(parent: Comment, message: str, mark_resolved: bool) -> dict[str, Any]:
@@ -320,8 +330,17 @@ class CommentReplier:
 
         Each reply goes on its parent comment's patchset, found by the
         comment_id, so a reply staged before a new patchset still lands in
-        its thread.  One review is posted per patchset; if one fails, the
-        replies not yet posted stay staged.
+        its thread. As in the web UI, every reply is first a draft on its
+        patchset and then all are published at once: a review POST can
+        carry comments for its own revision only, and one post per
+        patchset makes as many messages, which Gerrit's one-second
+        timestamps mix up. Publishing takes every draft of the account on
+        the change, so drafts it already had make the push refuse, and so
+        does one saved while the push runs. In drafts mode the replies
+        stay drafts. Nothing is posted unless all drafts are made; on a
+        failure the ones made are deleted and everything stays staged.
+        When the publish itself fails, the drafts tell what happened:
+        gone means Gerrit published them and only its answer was lost.
 
         Args:
             change_number: The change number
@@ -367,7 +386,7 @@ class CommentReplier:
             for path, raws in (published or {}).items()
             for raw in raws
         }
-        posts: dict[str, list[tuple[Any, str, dict[str, Any]]]] = {}
+        replies = []
         for op in staged.operations:
             parent = parents.get(op.comment_id) or Comment(
                 id=op.comment_id, patch_set=current_patchset,
@@ -375,37 +394,105 @@ class CommentReplier:
                 author=Author(name=""), unresolved=True, updated="",
             )
             [revision] = _reply_revisions(change, [parent.patch_set])
-            posts.setdefault(revision, []).append(
-                (op, parent.file_path, _reply_input(parent, op.message, op.resolve))
-            )
+            replies.append((revision, {
+                "path": parent.file_path,
+                **_reply_input(parent, op.message, op.resolve),
+            }))
 
-        total = len(staged.operations)
-        posted: list[Any] = []
-        for revision, entries in posts.items():
-            comments_dict: dict[str, list[dict[str, Any]]] = {}
-            for _, path, comment_input in entries:
-                comments_dict.setdefault(path, []).append(comment_input)
+        total = len(replies)
+        drafts_mode = is_drafts_mode()
+        if not drafts_mode:
             try:
-                self.client.post_review(
-                    change_number=change_number,
-                    revision_id=revision,
-                    comments=comments_dict,
-                )
+                existing = self.client.get_drafts(change_number) or {}
             except Exception as e:
-                if posted:
-                    staged.operations = [
-                        op for op in staged.operations
-                        if not any(op is done for done in posted)
-                    ]
-                    self.staging_manager.save_staged(staged)
-                return False, self._push_error(e, change_number, len(posted), total), total
-            posted.extend(op for op, _, _ in entries)
+                return False, self._push_error(e, change_number, total), total
+            mine = [label for _, label in _draft_labels(existing)]
+            if mine:
+                return False, (
+                    f"Change {change_number} already has {len(mine)} draft "
+                    f"comment(s) of yours ({', '.join(mine)}); publishing the "
+                    "replies would publish them too. Publish or delete them "
+                    f"in the web UI, then push again. All {total} replies "
+                    "are still staged."
+                ), total
+
+        created: list[tuple[str, Optional[str]]] = []
+        try:
+            for revision, comment in replies:
+                draft = self.client.create_draft(change_number, revision, comment)
+                created.append((revision, (draft or {}).get("id")))
+        except Exception as e:
+            self._delete_drafts(change_number, created)
+            return False, self._push_error(e, change_number, total), total
+
+        if not drafts_mode:
+            ours = {draft_id for _, draft_id in created}
+            try:
+                # a draft saved in the web UI since the first check
+                others = [label for draft_id, label
+                          in _draft_labels(self.client.get_drafts(change_number))
+                          if draft_id not in ours]
+            except Exception as e:
+                self._delete_drafts(change_number, created)
+                return False, self._push_error(e, change_number, total), total
+            if others:
+                self._delete_drafts(change_number, created)
+                return False, (
+                    f"You saved {len(others)} draft comment(s) on change "
+                    f"{change_number} during the push ({', '.join(others)}); "
+                    "publishing would have taken them along, so nothing was "
+                    f"posted. All {total} replies are still staged."
+                ), total
+            try:
+                self.client.publish_drafts(change_number)
+            except Exception as e:
+                published = self._published(change_number, ours)
+                if published is None:
+                    return False, (
+                        f"Publishing failed or its answer was lost ({_error_text(e)}), "
+                        "and gerrit-cli could not tell whether it went through. "
+                        f"The {total} replies are still staged and their drafts "
+                        "may still be on the change: check it in the web UI. If "
+                        f"the replies are there, run 'gerrit staged clear {change_number}'; "
+                        "if not, publish or delete those drafts. Push refuses "
+                        "while they exist, so it cannot post them twice."
+                    ), total
+                if not published:
+                    self._delete_drafts(change_number, created)
+                    return False, self._push_error(e, change_number, total), total
 
         self.staging_manager.clear_staged(change_number)
+        if drafts_mode:
+            return True, (
+                f"✓ Created {total} draft replies on Change {change_number}; "
+                f"not published ({MODE_ENV_VAR}={MODE_DRAFTS}). Publish them "
+                "in the Gerrit web UI."
+            ), total
         return True, f"✓ Pushed {total} operations to Change {change_number}", total
 
+    def _delete_drafts(self, change_number: int,
+                       created: list[tuple[str, Optional[str]]]) -> None:
+        """Remove the drafts this push made, best effort."""
+        for revision, draft_id in created:
+            if draft_id:
+                try:
+                    self.client.delete_draft(change_number, revision, draft_id)
+                except Exception:
+                    pass
+
+    def _published(self, change_number: int, ours: set) -> Optional[bool]:
+        """After a failed publish: True when this push's drafts are gone
+        (Gerrit published them and only its answer was lost), False when
+        they are still there, None when that cannot be checked."""
+        try:
+            left = {draft_id for draft_id, _
+                    in _draft_labels(self.client.get_drafts(change_number))}
+        except Exception:
+            return None
+        return not (ours & left)
+
     @staticmethod
-    def _push_error(e: Exception, change_number: int, posted: int, total: int) -> str:
+    def _push_error(e: Exception, change_number: int, total: int) -> str:
         if isinstance(e, ConnectionError):
             msg = f"Network error: Could not connect to Gerrit server.\nDetails: {e}\nPlease check your connection and try again."
         elif isinstance(e, TimeoutError):
@@ -418,8 +505,7 @@ class CommentReplier:
                 msg += "\nPossible cause: Insufficient permissions for this operation."
             elif "404" in str(e):
                 msg += f"\nPossible cause: Change {change_number} not found or has been deleted."
-        if posted:
-            msg += f"\n{posted} of {total} were posted; the other {total - posted} are still staged."
+        msg += f"\nNothing was posted; all {total} are still staged."
         return msg
 
 

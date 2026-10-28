@@ -158,6 +158,14 @@ If you're in an active session (from review-series), the URL is optional.
 The 'push' command posts all staged replies to Gerrit. Use --dry-run to
 preview what would be posted without actually sending.
 
+Each reply goes in its thread, on the patchset its parent comment was
+made on, and all of them are published together as one message, the
+way the web UI does it: drafts first, then one publish. Publishing
+takes every draft of yours on the change, so push refuses while you
+have other drafts there; publish or delete them first. If anything
+fails, nothing is posted and the replies stay staged. With
+GERRIT_CLI_MODE=drafts the replies are left as drafts.
+
 It does not push commits. To upload a patchset, use 'upload'.
 """,
         "examples": [

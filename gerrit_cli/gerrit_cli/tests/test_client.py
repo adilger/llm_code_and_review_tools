@@ -325,6 +325,27 @@ class TestGerritCommentsClientWithMocks:
 
         assert result is None
 
+    @patch.dict(os.environ, {"GERRIT_CLI_MODE": "drafts"})
+    @patch("gerrit_cli.client.GerritRestAPI")
+    @patch("gerrit_cli.client.HTTPBasicAuth")
+    def test_create_and_delete_draft(self, mock_auth, mock_api):
+        """Drafts go straight to the drafts endpoint, drafts mode or not."""
+        mock_rest = MagicMock()
+        mock_rest.put.return_value = {"id": "d1"}
+        mock_api.return_value = mock_rest
+
+        client = GerritCommentsClient()
+        comment = {"path": "a.c", "line": 3, "in_reply_to": "p1",
+                   "message": "Done", "unresolved": False}
+        assert client.create_draft(123, "abc123", comment) == {"id": "d1"}
+        mock_rest.put.assert_called_once_with(
+            "/changes/123/revisions/abc123/drafts", json=comment)
+
+        client.delete_draft(123, "abc123", "d1")
+        mock_rest.delete.assert_called_once_with(
+            "/changes/123/revisions/abc123/drafts/d1")
+        mock_rest.post.assert_not_called()
+
     @patch.dict(os.environ, {"GERRIT_CLI_MODE": "full"})
     @patch("gerrit_cli.client.GerritRestAPI")
     @patch("gerrit_cli.client.HTTPBasicAuth")
