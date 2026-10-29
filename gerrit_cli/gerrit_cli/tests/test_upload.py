@@ -27,6 +27,7 @@ import pytest
 from gerrit_cli.errors import ErrorCode, ExitCode
 from gerrit_cli.upload import (
     ASKPASS_PASS_VAR,
+    MAX_COMMITS,
     PUSH_URL_VAR,
     REDACTED,
     UploadError,
@@ -704,6 +705,53 @@ def test_more_than_one_new_commit_is_refused_and_names_series(gerrit):
     assert pushed_refs(bare) == {}
 
 
+def _on_master_next(work, bare, count):
+    """Push `count` commits to the server's master-next; HEAD on top."""
+    for i in range(count):
+        commit(work, f"LU-{100 + i} misc: landed on master-next",
+               committer=("Upstream", "upstream@example.com"))
+    git(work, "push", "-q", str(bare), "HEAD:refs/heads/master-next")
+
+
+def test_head_on_master_next_is_refused_without_base(gerrit):
+    fake, bare, work = gerrit
+    _on_master_next(work, bare, MAX_COMMITS + 1)
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164")
+
+    assert err.value.code == ErrorCode.TOO_MANY_COMMITS
+    assert "--base" in err.value.message
+    assert pushed_refs(bare) == {}
+
+
+def test_base_counts_from_another_server_branch(gerrit):
+    fake, bare, work = gerrit
+    _on_master_next(work, bare, MAX_COMMITS + 1)
+    head = commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT)
+
+    data = upload(fake, repo=str(work), change="51164", base="master-next")
+
+    assert data["pushed"] is True
+    assert (data["branch"], data["base"]) == ("master", "master-next")
+    assert [c["sha"] for c in data["commits"]] == [head]
+    assert (data["change_number"], data["patchset"]) == (51164, 3)
+    assert pushed_refs(bare) == {"refs/for/master": head}
+
+
+def test_an_unknown_base_is_not_found(gerrit):
+    fake, bare, work = gerrit
+    commit(work, "LU-1 llite: fix", cid=CID_A, committer=BOT)
+
+    with pytest.raises(UploadError) as err:
+        upload(fake, repo=str(work), change="51164", base="no-such")
+
+    assert err.value.code == ErrorCode.NOT_FOUND
+    assert "no-such" in err.value.message
+    assert pushed_refs(bare) == {}
+
+
 def test_named_change_below_head_points_at_series(gerrit):
     fake, bare, work = gerrit
     fake.add_change(60000, CID_B, subject="LU-2 osc: parent")
@@ -1323,19 +1371,19 @@ def test_upload_parser_defines_what_the_handler_reads():
     bare = parser.parse_args(["upload"])
     assert bare.func is cli.cmd_upload
     assert (bare.change, bare.series, bare.dry_run, bare.no_amend,
-            bare.repo, bare.expect_patchset) == (
-        None, False, False, False, ".", None,
+            bare.repo, bare.expect_patchset, bare.base) == (
+        None, False, False, False, ".", None, None,
     )
 
     full = parser.parse_args([
         "upload", "51164", "--series", "--dry-run", "--no-amend",
         "--topic", "t", "--repo", "/r", "--branch", "b", "--project", "p",
-        "--expect-patchset", "3",
+        "--expect-patchset", "3", "--base", "master-next",
     ])
     assert (full.change, full.series, full.dry_run, full.no_amend,
             full.topic, full.repo, full.branch, full.project,
-            full.expect_patchset) == (
-        "51164", True, True, True, "t", "/r", "b", "p", 3,
+            full.expect_patchset, full.base) == (
+        "51164", True, True, True, "t", "/r", "b", "p", 3, "master-next",
     )
 
 

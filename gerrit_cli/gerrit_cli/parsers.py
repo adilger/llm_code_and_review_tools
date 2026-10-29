@@ -636,6 +636,14 @@ def add_upload_parser(subparsers):
              "change)",
     )
     parser.add_argument(
+        "--base",
+        default=None,
+        metavar="BRANCH",
+        help="Another server branch HEAD is built on, such as master-next "
+             "when a reviewer asked for a rebase onto it: its commits are "
+             "not counted, and the push still goes to --branch",
+    )
+    parser.add_argument(
         "--project",
         default=None,
         help="Gerrit project (default: the change's; required for a new "

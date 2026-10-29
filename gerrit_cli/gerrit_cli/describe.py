@@ -372,11 +372,12 @@ def get_tool_description() -> ToolDescription:
                     "moved past patchset N, so a concurrent uploader's "
                     "patchset is not silently replaced."
                 ),
-                usage="gc [--user SET] upload [CHANGE] [--series] [--branch B] [--project P] [--topic T] [--repo PATH] [--no-amend] [--expect-patchset N] [--dry-run]",
+                usage="gc [--user SET] upload [CHANGE] [--series] [--branch B] [--base BRANCH] [--project P] [--topic T] [--repo PATH] [--no-amend] [--expect-patchset N] [--dry-run]",
                 arguments=[
                     Argument(name="change", description="Change number, URL or Change-Id that HEAD (with --series: one of the uploaded commits) must belong to (default: the one HEAD's Change-Id names)"),
                     Argument(name="--series", description="Upload every commit between the branch and HEAD, each to its own change by its Change-Id", type="boolean", default=False),
                     Argument(name="--branch", description="Target branch (default: the change's; required for a new change)"),
+                    Argument(name="--base", description="Another server branch HEAD is built on (e.g. master-next at a reviewer's request); its commits are not counted, and the push still targets --branch"),
                     Argument(name="--project", description="Gerrit project (default: the change's; required for a new change)"),
                     Argument(name="--topic", description="Topic to set on the upload"),
                     Argument(name="--repo", description="Repository to upload from", default="."),
@@ -389,9 +390,10 @@ def get_tool_description() -> ToolDescription:
                     "gc --user patrickbot upload 12345",
                     "gc --user patrickbot upload 12345 --series",
                     "gc --user patrickbot upload 12345 --expect-patchset 3",
+                    "gc --user patrickbot upload 12345 --base master-next",
                     "gc upload --project fs/lustre-release --branch master",
                 ],
-                output_fields=["sha", "change_number", "url", "patchset", "new_change", "committer_amended[]", "commits[].action", "commits[].change_number", "commits[].patchset", "remote_messages", "warnings"],
+                output_fields=["sha", "change_number", "url", "patchset", "new_change", "committer_amended[]", "commits[].action", "commits[].change_number", "commits[].patchset", "base", "remote_messages", "warnings"],
                 next_actions=["info", "comments"],
             ),
             Command(

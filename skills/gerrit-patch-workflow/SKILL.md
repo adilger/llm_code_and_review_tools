@@ -326,6 +326,8 @@ is not the working directory.
   something else might be touching the change: any bot, any concurrent
   session. On a refusal, rebase onto the patchset that is now current
   rather than pushing over it. It does not apply to `--series`.
+- Rebased onto `master-next` at a reviewer's request: `--base master-next`;
+  the change still targets master.
 - A commit-message-only amend -- wording, a `Test-Parameters:` line -- is
   uploaded the same way; Gerrit takes it as a new patchset with no diff.
 - With `--series`, every commit in the range goes to the change its own

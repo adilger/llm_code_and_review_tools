@@ -134,8 +134,9 @@ gc review --post-comments review.json --prefix '[Marc Bot]' <URL>
 (`gc push` is something else: it posts staged comment replies.)
 
 ```bash
-gc [--user SET] upload [CHANGE] [--series] [--branch B] [--project P]
-                       [--topic T] [--repo PATH] [--no-amend] [--dry-run]
+gc [--user SET] upload [CHANGE] [--series] [--branch B] [--base BRANCH]
+                       [--project P] [--topic T] [--repo PATH] [--no-amend]
+                       [--dry-run]
 
 # An automated run uploading the next patchset of change 12345 as the bot:
 gc --user patrickbot upload 12345 --repo /path/to/checkout
@@ -165,6 +166,9 @@ gc --user patrickbot upload 12345 --repo /path/to/checkout
   own Change-Id names (updated, or created if new); every commit needs a
   Change-Id, and CHANGE, if given, may be any commit in the range rather
   than HEAD. Commits Gerrit already has are not uploaded again.
+- **`--base BRANCH`.** Rebased onto `master-next` at a reviewer's
+  request: `--base master-next` leaves that branch's commits out of the
+  range, and the change still targets master.
   When a refusal's range holds a commit that looks made where an amend
   was meant -- one sitting on the commit it should have replaced, with
   no Change-Id or a new one -- the error ends with a hint asking whether
@@ -575,6 +579,7 @@ push <change>                    # Post staged comment replies (not commits)
 upload [CHANGE]                  # Push HEAD as a new patchset (see above)
 upload [CHANGE] --series         # Push every new commit up to HEAD
 upload --project P --branch B    # Push HEAD as a new change
+upload [CHANGE] --base master-next  # HEAD rebased onto master-next, still for master
 ```
 
 ### Reintegration (for stale patches)

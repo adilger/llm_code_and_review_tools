@@ -1357,12 +1357,17 @@ def upload(
     amend: bool = True,
     series: bool = False,
     expect_patchset: int | None = None,
+    base: str | None = None,
 ) -> dict[str, Any]:
     """Push HEAD to refs/for/<branch> as the client's account.
 
     Without ``series``, HEAD must be the only commit Gerrit does not
     have yet.  With it, every such commit between the branch and HEAD is
     uploaded, each to the change its own Change-Id names.
+
+    ``base`` names another server branch HEAD is built on (a change
+    rebased onto master-next while it still targets master): commits on
+    it are left out of the range as Gerrit leaves them out of the push.
 
     Raises:
         UploadError: on every refusal and failure.  Nothing has been
@@ -1421,19 +1426,32 @@ def upload(
 
     with _Askpass(client.username, client.password) as askpass:
         tip = _branch_tip(repo, url, branch, askpass)
-        commits = _read_commits(repo, [f"{tip}..{head.sha}"])
+        if base and base != branch:
+            base_tip = _branch_tip(repo, url, base, askpass)
+            commits = _read_commits(
+                repo, [f"^{tip}", f"^{base_tip}", head.sha]
+            )
+            # Name the range by the base: it is what HEAD sits on.
+            over, over_tip = base, base_tip
+        else:
+            base = None
+            commits = _read_commits(repo, [f"{tip}..{head.sha}"])
+            over, over_tip = branch, tip
         if not commits:
             raise UploadError(
                 ErrorCode.NO_NEW_CHANGES,
-                f"HEAD {head.sha[:12]} is already on {branch}; there is "
+                f"HEAD {head.sha[:12]} is already on "
+                f"{f'{branch} or {base}' if base else branch}; there is "
                 "nothing to upload.",
             )
         if len(commits) > MAX_COMMITS:
             raise UploadError(
                 ErrorCode.TOO_MANY_COMMITS,
                 f"HEAD is {len(commits)} commits ahead of {project} "
-                f"{branch}; Gerrit would open a change for each. HEAD is "
-                "probably based on another branch -- check --branch.",
+                f"{over}; Gerrit would open a change for each. HEAD is "
+                "probably based on another branch -- check --branch, or "
+                "if HEAD is based on another server branch such as "
+                "master-next, pass --base that-branch.",
             )
 
         known = _with_ancestors(
@@ -1443,11 +1461,11 @@ def upload(
         if not new:
             raise UploadError(
                 ErrorCode.NO_NEW_CHANGES,
-                f"Every commit between {branch} and HEAD {head.sha[:12]} "
+                f"Every commit between {over} and HEAD {head.sha[:12]} "
                 "is already on Gerrit; there is nothing new to upload.",
             )
 
-        _check_duplicate_change_ids(commits, known, named, branch, tip)
+        _check_duplicate_change_ids(commits, known, named, over, over_tip)
 
         plan = None
         try:
@@ -1460,7 +1478,7 @@ def upload(
             if expect_patchset is not None:
                 _check_expected_patchset(client, head_entry, expect_patchset)
         except UploadError as e:
-            hint = _amend_hint(commits, new, series, plan, branch, tip)
+            hint = _amend_hint(commits, new, series, plan, over, over_tip)
             if hint:
                 e.message += hint
                 e.details["hint"] = hint.strip()
@@ -1487,6 +1505,7 @@ def upload(
             "series": series,
             "project": project,
             "branch": branch,
+            "base": base,
             "ref": ref,
             "topic": topic,
             "account": account.username,
