@@ -82,6 +82,10 @@ veto (three +1s and a -1 make +2); only a -2 or the owner's own -1 (not
 ready yet) blocks, shown as `R ✗`. Gerrit's attention set is deliberately ignored — it only
 works if everyone maintains it.
 
+Times on the page (the header's "updated", the footer, the board index)
+are shown in the viewer's own timezone, with the age next to them
+("· 2h ago") kept current; without JavaScript they stay in UTC.
+
 Whatever stops a change landing is shown on every row, not only on your
 own patches: a red chip for a needed rebase, a bot's Code-Review -1, a
 Verified veto or a blocking review vote (build and test failures are the

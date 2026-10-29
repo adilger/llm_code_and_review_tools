@@ -520,6 +520,7 @@ def create_app(config: Config | None = None, start_refresher: bool = True) -> Fl
                 "interval": state.interval,
                 "snapshot_id": (state.snapshot or {}).get("snapshot_id"),
                 "generated_at": (state.snapshot or {}).get("generated_at"),
+                "fetched_at": (state.snapshot or {}).get("fetched_at"),
             })
 
     @app.route("/<user>/api/refresh", methods=["POST"])

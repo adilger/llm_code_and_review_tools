@@ -287,3 +287,29 @@ class TestBoardFromOtherCode:
         app = create_app(cfg, start_refresher=False)
         app.config.update(TESTING=True)
         assert app.test_client().get("/alex/").status_code == 200
+
+
+class TestLocalTime:
+    """Timestamps carry the epoch so the browser can show the viewer's own
+    timezone and the age; the UTC text is only the no-JavaScript fallback."""
+
+    @pytest.mark.parametrize("design", [None, "classic"])
+    def test_board_header_and_footer_carry_the_epoch(self, tmp_path, design):
+        html = get(tmp_path, "/alex/", design=design)
+        assert re.search(r'id="gd-status"[^>]* data-gd-epoch="[\d.]+" data-gd-rel data-gd-prefix="updated "', html)
+        assert html.count("data-gd-epoch=") >= 2          # header + footer
+        assert "window.gdTime" in html
+
+    @pytest.mark.parametrize("design", [None, "classic"])
+    def test_index_ages_and_times_are_local(self, tmp_path, design):
+        html = get(tmp_path, "/", design=design)
+        assert "data-gd-rel-only" in html
+        assert re.search(r'class="abs" data-gd-epoch="[\d.]+"', html)
+
+    def test_status_api_reports_the_epoch(self, tmp_path):
+        body = client(tmp_path).get("/alex/api/status").get_json()
+        assert isinstance(body["fetched_at"], (int, float))
+
+    def test_static_export_also_converts(self, tmp_path):
+        html = client(tmp_path).get("/alex/export").get_data(as_text=True)
+        assert "window.gdTime" in html and "data-gd-epoch=" in html

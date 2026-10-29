@@ -278,9 +278,9 @@
   <span class="ident">{{ snapshot.self.name if snapshot else '…' }} · {{ gerrit_url | replace('https://', '') | replace('http://', '') }}</span>
   <div class="right">
     {% if static_mode %}
-      <span class="status">static export {{ snapshot.generated_at if snapshot }} — refresh/watchlist controls are on the live app (gerrit-dashboard serve)</span>
+      <span class="status">static export {% if snapshot %}<span data-gd-epoch="{{ snapshot.fetched_at }}" data-gd-rel>{{ snapshot.generated_at }}</span>{% endif %} — refresh/watchlist controls are on the live app (gerrit-dashboard serve)</span>
     {% else %}
-      <span class="status" id="gd-status">
+      <span class="status" id="gd-status"{% if snapshot %} data-gd-epoch="{{ snapshot.fetched_at }}" data-gd-rel data-gd-prefix="updated "{% endif %}>
         {% if snapshot %}updated {{ snapshot.generated_at }}{% else %}no data yet — first refresh running{% endif %}
       </span>
       <span class="prog hidden" id="gd-prog">
@@ -738,7 +738,7 @@
 </section>
 
 <footer>
-  snapshot {{ snapshot.snapshot_id }} · generated {{ snapshot.generated_at }} · read-only against Gerrit · <span class="gd-version">gerrit-dashboard {{ gd_version }}</span>
+  snapshot {{ snapshot.snapshot_id }} · generated <span data-gd-epoch="{{ snapshot.fetched_at }}">{{ snapshot.generated_at }}</span> · read-only against Gerrit · <span class="gd-version">gerrit-dashboard {{ gd_version }}</span>
 </footer>
 {% endif %}
 
@@ -985,7 +985,14 @@
           }
         } else if (s.generated_at) {
           progFill.style.width = '0';
-          statusEl.textContent = 'updated ' + s.generated_at;
+          if (s.fetched_at && window.gdTime) {
+            statusEl.dataset.gdEpoch = s.fetched_at;
+            statusEl.dataset.gdRel = '';
+            statusEl.dataset.gdPrefix = 'updated ';
+            window.gdTime.render(statusEl.parentNode);
+          } else {
+            statusEl.textContent = 'updated ' + s.generated_at;
+          }
         }
         if (document.activeElement !== intervalEl) intervalEl.value = String(s.interval);
         if (s.snapshot_id && s.snapshot_id !== SNAP_ID && !s.refreshing) location.reload();

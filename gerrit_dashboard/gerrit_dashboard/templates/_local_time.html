@@ -1,0 +1,44 @@
+<script>
+/*
+ * Timestamps in the viewer's own timezone.  The server only knows UTC, so
+ * an element with data-gd-epoch (seconds) is rewritten here; data-gd-rel
+ * appends the age ("· 2h ago", same buckets as the board index) and
+ * data-gd-rel-only shows just the age, all kept current once a minute.
+ * Without JavaScript the server's UTC text stays.
+ */
+(function () {
+  "use strict";
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function local(epoch) {
+    var d = new Date(epoch * 1000), tz = "";
+    try {
+      var part = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(d).filter(function (p) { return p.type === "timeZoneName"; })[0];
+      if (part) tz = " " + part.value;
+    } catch (e) {}
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + tz;
+  }
+  function ago(epoch) {
+    var s = Math.max(0, Math.floor(Date.now() / 1000 - epoch));
+    if (s < 90) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  function text(epoch, rel) { return local(epoch) + (rel ? " · " + ago(epoch) : ""); }
+  function render(root) {
+    (root || document).querySelectorAll("[data-gd-epoch]").forEach(function (el) {
+      var epoch = parseFloat(el.dataset.gdEpoch);
+      if (!epoch) return;
+      el.textContent = "gdRelOnly" in el.dataset ? ago(epoch)
+        : (el.dataset.gdPrefix || "") + text(epoch, "gdRel" in el.dataset);
+      el.title = new Date(epoch * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+    });
+  }
+  window.gdTime = { local: local, ago: ago, text: text, render: render };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { render(); });
+  else render();
+  setInterval(render, 60000);
+})();
+</script>
