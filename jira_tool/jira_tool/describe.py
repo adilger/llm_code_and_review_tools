@@ -36,7 +36,7 @@ def get_tool_description() -> ToolDescription:
                     "jira get https://jira.example.com/browse/PROJ-123",
                     "jira get PROJ-123 --output status",
                 ],
-                output_fields=["key", "id", "summary", "description", "status", "priority", "issue_type", "project", "assignee", "reporter", "resolution", "created", "updated", "labels", "comments", "total_comments"],
+                output_fields=["key", "id", "summary", "description", "status", "priority", "issue_type", "project", "assignee", "reporter", "resolution", "created", "updated", "labels", "components", "fix_versions", "affects_versions", "comments", "total_comments"],
                 next_actions=["comments", "transitions", "attachments", "links"],
             ),
             Command(

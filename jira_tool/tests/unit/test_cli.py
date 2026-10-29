@@ -107,6 +107,9 @@ class TestNormalizeIssue:
                 "created": "2024-01-15T10:00:00.000+0000",
                 "updated": "2024-01-15T12:00:00.000+0000",
                 "labels": ["bug", "urgent"],
+                "components": [{"name": "llite"}],
+                "fixVersions": [{"name": "Lustre 2.18.0"}],
+                "versions": [{"name": "Lustre 2.17.0"}],
             },
         }
 
@@ -124,6 +127,9 @@ class TestNormalizeIssue:
         assert result["reporter"] == "Jane Doe"
         assert result["resolution"] == "Fixed"
         assert result["labels"] == ["bug", "urgent"]
+        assert result["components"] == ["llite"]
+        assert result["fix_versions"] == ["Lustre 2.18.0"]
+        assert result["affects_versions"] == ["Lustre 2.17.0"]
 
     def test_normalize_issue_with_null_fields(self):
         """Should handle null/missing fields."""
@@ -140,6 +146,7 @@ class TestNormalizeIssue:
 
         assert result["assignee"] is None
         assert result["resolution"] is None
+        assert result["fix_versions"] == []
 
 
 class TestNormalizeComment:

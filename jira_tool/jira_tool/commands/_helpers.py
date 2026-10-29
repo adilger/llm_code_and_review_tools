@@ -328,6 +328,9 @@ def _normalize_issue(raw_issue: dict[str, Any]) -> dict[str, Any]:
         "created": fields.get("created"),
         "updated": fields.get("updated"),
         "labels": fields.get("labels", []),
+        "components": _names(fields.get("components")),
+        "fix_versions": _names(fields.get("fixVersions")),
+        "affects_versions": _names(fields.get("versions")),
     }
 
     if parent_key:
@@ -338,6 +341,11 @@ def _normalize_issue(raw_issue: dict[str, Any]) -> dict[str, Any]:
         result["subtask"] = True
 
     return result
+
+
+def _names(items: list[dict[str, Any]] | None) -> list[str]:
+    """Names of a list of named JIRA objects (versions, components)."""
+    return [i.get("name") for i in items or [] if i.get("name")]
 
 
 def _normalize_comment(raw_comment: dict[str, Any]) -> dict[str, Any]:
