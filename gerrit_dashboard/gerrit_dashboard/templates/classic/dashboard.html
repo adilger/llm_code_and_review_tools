@@ -383,6 +383,7 @@
   {% for h in r.hashtags %}<span class="chip tag" title="hashtag">{{ h }}</span>{% endfor %}
   {% if r.ci_ps and r.ci_ps != r.ps %}<span class="chip mono" title="Later patchset(s) changed only the commit message; CI did not re-run">CI@PS{{ r.ci_ps }}</span>{% endif %}
   {% if r.wip %}<span class="chip warn">WIP</span>{% endif %}
+  {% if r.private %}<span class="chip warn" title="Private change: visible only to its owner, reviewers and CCs">private</span>{% endif %}
   {% if r.queued %}<span class="chip tag">{{ r.queued_tag }}</span>{% endif %}
   {% if r.starred %}<span class="chip warn">★</span>{% endif %}
   {% if r.hidden %}<span class="chip">hidden</span>{% endif %}

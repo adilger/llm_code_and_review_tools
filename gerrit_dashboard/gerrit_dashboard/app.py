@@ -125,7 +125,8 @@ class UserCtx:
                                 migrate_legacy=(username == cfg.default_user))
         self.fetcher = GerritFetcher(cfg, self.store, target=username)
         self.state = AppState()
-        self.state.snapshot = self.store.load_snapshot(projects=cfg.projects)
+        self.state.snapshot = self.store.load_snapshot(
+            projects=cfg.projects, show_private=cfg.show_private)
         saved = self.store.load_settings().get("refresh_seconds")
         interval = saved if isinstance(saved, int) else cfg.refresh_seconds
         self.state.interval = MIN_INTERVAL if 0 < interval < MIN_INTERVAL else interval

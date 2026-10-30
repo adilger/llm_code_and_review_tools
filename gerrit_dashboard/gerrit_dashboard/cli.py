@@ -102,10 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "snapshot":
         app = create_app(cfg, start_refresher=False)
         if args.cached:
-            snapshot = store.load_snapshot(projects=cfg.projects)
+            snapshot = store.load_snapshot(projects=cfg.projects,
+                                           show_private=cfg.show_private)
             if snapshot is None:
                 print("no cached snapshot (or one built under a different "
-                      "project filter); run without --cached first", file=sys.stderr)
+                      "project or private filter); run without --cached first", file=sys.stderr)
                 return 1
         else:
             fetcher = GerritFetcher(cfg, store, target=user)

@@ -76,6 +76,10 @@ class Config:
     # GD_PROJECTS=a,b so those are never even fetched, let alone
     # rendered.
     projects: list[str] = field(default_factory=list)
+    # A private change is meant for its owner, reviewers and CCs, but any
+    # visitor can open any board, so private changes are left out unless
+    # the host opts in (GD_SHOW_PRIVATE=1).
+    show_private: bool = False
     # Bound on concurrently live per-user contexts (LRU-evicted beyond
     # this; the default user is never evicted).
     max_users: int = 20
@@ -129,6 +133,7 @@ class Config:
             cfg.projects = _split_csv(os.environ["GD_PROJECTS"])
         elif os.environ.get("GD_COMMUNITY", "").lower() in ("1", "true", "yes"):
             cfg.projects = list(COMMUNITY_PROJECTS)
+        cfg.show_private = os.environ.get("GD_SHOW_PRIVATE", "").lower() in ("1", "true", "yes")
         if os.environ.get("GD_NEXT_QUEUES"):
             queues = []
             for item in _split_csv(os.environ["GD_NEXT_QUEUES"]):

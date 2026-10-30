@@ -101,18 +101,22 @@ class Store:
 
     # -- snapshot ----------------------------------------------------------
 
-    def load_snapshot(self, projects: list[str] | None = None) -> dict | None:
+    def load_snapshot(self, projects: list[str] | None = None,
+                      show_private: bool = False) -> dict | None:
         """Load the persisted snapshot; None if unusable.
 
         `projects` is the current project allowlist: a snapshot built
         under a DIFFERENT allowlist is discarded, so a restricted
         (public) instance can never serve rows that a previous
-        unrestricted run persisted into the same data dir.
+        unrestricted run persisted into the same data dir.  The same
+        goes for `show_private`.
         """
         snap = self._load(SNAPSHOT_FILE, None)
         if not isinstance(snap, dict) or snap.get("schema") != SNAPSHOT_SCHEMA:
             return None
         if snap.get("projects", []) != sorted(projects or []):
+            return None
+        if snap.get("show_private", False) != show_private:
             return None
         return snap
 

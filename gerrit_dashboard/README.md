@@ -107,6 +107,7 @@ what has to happen first.
 | `GD_BOARDS` | *(any user)* | restrict which usernames get a board |
 | `GD_PROJECTS` | *(all visible)* | project allowlist |
 | `GD_COMMUNITY` | 0 | shorthand for `GD_PROJECTS=fs/lustre-release` |
+| `GD_SHOW_PRIVATE` | 0 | include private changes (marked "private"); off, they are never fetched |
 | `GD_NEXT_QUEUES` | `fs/lustre-release:master` | `project:branch` pairs whose `<branch>-next` staging branch marks a change as queued to land |
 | `GD_VERIFIED_OVERRIDE` | *(none)* | emails whose Verified +1 stands in for a missing test-bot vote |
 | `GD_BRANCH_COLORS` | *(none)* | `branch:token` tinting, e.g. `b2_15:tag,b2_16:run` (tokens: tag, run, ok, bad, warn, muted) |
@@ -132,6 +133,11 @@ fetched; anything that still arrives by another path (a watchlist entry) is
 dropped before enrichment and unwatched, with a message that does not
 distinguish "not allowed here" from "does not exist". Give such an instance
 its own `GD_DATA_DIR`.
+
+Private changes are handled the same way, since the credentials can read
+them but anyone who can reach the instance can open its boards: they are
+left out of the queries (`-is:private`) and dropped, and unwatched, if a
+watchlist entry fetches one, unless `GD_SHOW_PRIVATE=1`.
 
 ## Deployment
 

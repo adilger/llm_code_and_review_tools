@@ -112,6 +112,10 @@ class GerritFetcher:
             return f" project:{projs[0]}"
         return " (" + " OR ".join(f"project:{p}" for p in projs) + ")"
 
+    def _scope_clause(self) -> str:
+        """Query suffix for everything this instance may serve."""
+        return self._project_clause() + ("" if self.config.show_private else " -is:private")
+
     # -- low level ---------------------------------------------------------
 
     def _client(self) -> GerritCommentsClient:
@@ -313,7 +317,7 @@ class GerritFetcher:
 
         # Core queries fail the whole refresh: a partial bundle would
         # overwrite the last good snapshot with gutted sections.
-        pc = self._project_clause()
+        pc = self._scope_clause()
         queries = [
             ("mine", f"owner:{u} status:open{pc}"),
             ("mine", f"owner:{u} is:wip status:open{pc}"),
@@ -366,22 +370,26 @@ class GerritFetcher:
         tick("watchlist")
 
         # Defense-in-depth for restricted deployments: nothing outside the
-        # project allowlist may survive into the bundle, whatever path it
-        # arrived by.
-        if self.config.projects:
-            allowed = set(self.config.projects)
-            for n in [n for n, c in changes.items() if c.get("project") not in allowed]:
-                changes.pop(n)
-                roles.pop(n, None)
-                if n in watched:
-                    drop.add(n)
+        # project allowlist, and nothing private unless the host opted in,
+        # may survive into the bundle, whatever path it arrived by.
+        allowed = set(self.config.projects)
+
+        def servable(c: dict) -> bool:
+            return ((not allowed or c.get("project") in allowed)
+                    and (self.config.show_private or not c.get("is_private")))
+
+        for n in [n for n, c in changes.items() if not servable(c)]:
+            changes.pop(n)
+            roles.pop(n, None)
+            if n in watched:
+                drop.add(n)
 
         # Unwatch what this instance cannot serve, so it is not refetched
         # on every refresh forever.  The message is deliberately IDENTICAL
-        # for "no such change" and "outside the configured projects":
-        # otherwise adding a candidate number and reading the error back
-        # would reveal whether a change exists in a project this instance
-        # does not serve.
+        # for "no such change", "private" and "outside the configured
+        # projects": otherwise adding a candidate number and reading the
+        # error back would reveal whether a change exists that this
+        # instance does not serve.
         for n in sorted(drop):
             self.store.watchlist_remove(n)
             errors.append(f"watchlist change {n} is not available here — removed")

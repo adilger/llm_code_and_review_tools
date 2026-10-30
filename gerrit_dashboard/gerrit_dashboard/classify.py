@@ -71,6 +71,7 @@ def build_record(change: dict, bundle: dict, config: Config) -> dict:
         "branch": change.get("branch", ""),
         "status": change.get("status", ""),
         "wip": bool(change.get("work_in_progress")),
+        "private": bool(change.get("is_private")),
         "ps": ps,
         "ci_ps": ci_parse.ci_relevant_ps(change),
         "ps_created": rev.get("created", ""),
@@ -589,6 +590,7 @@ def build_snapshot(bundle: dict, config: Config) -> dict:
         # rejects a mismatch so restricted instances never serve rows
         # persisted by an unrestricted run (and vice versa).
         "projects": sorted(config.projects),
+        "show_private": config.show_private,
         "branches": branches,
         "branch_colors": dict(config.branch_colors),
         "generated_at": _iso(bundle["fetched_at"]),
