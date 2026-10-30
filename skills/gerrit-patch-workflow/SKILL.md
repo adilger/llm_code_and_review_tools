@@ -225,7 +225,8 @@ before adding someone to a change. `find-user` marks bot accounts `is_bot`.
 misses some bots, aireview among them), the `owner` and the
 `commit_author` (the commit's author, who may be only a CC when a bot
 owns the change). `human_participant_count` is the number of people
-already on the change. Per person it gives `added_at` (when they took the
+already on the change, and `people_besides_owner` the same without the
+owner: the count to check a cap on people against. Per person it gives `added_at` (when they took the
 role they hold now), `votes` standing on the current patchset,
 `copied_votes` (the ones Gerrit carried forward from an earlier
 patchset), `voted_on_current_patchset`, `last_vote`, and `last_activity`:

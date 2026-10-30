@@ -254,6 +254,10 @@ def cmd_reviewers(args):
             # change, owner and commit author included when listed.
             data["human_participant_count"] = sum(
                 1 for r in reviewer_list if not r["is_bot"])
+            # The count a reviewer cap is checked against: people, both
+            # roles, not the owner (67507's run counted these by hand).
+            data["people_besides_owner"] = sum(
+                1 for r in reviewer_list if not r["is_bot"] and not r["owner"])
             data["owner"] = _person((change or {}).get("owner") or {})
             data["commit_author"] = author
             listed = {r["account_id"] for r in reviewer_list}

@@ -327,3 +327,41 @@ def test_agent_accounts_are_participants_not_ci():
     assert is_bot(bot) is False
     assert is_bot_participant({"name": "Patrick Farrell",
                                "username": "pfarrell"}) is False
+
+
+class PatrickbotAsRegisteredClient(FakeClient):
+    """Gerrit gives Patrickbot's username as registered, capitalised, and
+    it is a CC on someone else's change (67507)."""
+
+    PATRICKBOT = {"_account_id": 30, "name": "patrick bot",
+                  "username": "Patrickbot"}
+
+    def __init__(self):
+        super().__init__(change={
+            "owner": ANDREAS,
+            "current_revision": "c",
+            "revisions": {"c": {"_number": 2, "commit": {"author": {
+                "name": "Andreas Dilger", "email": "adilger@example.com"}}}},
+            "reviewers": {"REVIEWER": [ANDREAS, BOBIJAM, JENKINS],
+                          "CC": [self.PATRICKBOT]},
+            "labels": {}, "reviewer_updates": [], "messages": [],
+        })
+
+    def get_reviewers(self, change_number):
+        return [dict(person, approvals={}) for person in
+                (ANDREAS, BOBIJAM, JENKINS, self.PATRICKBOT)]
+
+    def get_comments(self, change_number):
+        return {}
+
+
+def test_reviewers_patrickbot_is_no_person_whatever_its_case(monkeypatch, capsys):
+    """67507: Patrickbot came back is_bot false, and the count a reviewer
+    cap uses included it and the owner, so the run counted by hand."""
+    data = _run(monkeypatch, capsys, PatrickbotAsRegisteredClient())
+    by_name = {r["username"]: r for r in data["reviewers"]}
+    assert by_name["Patrickbot"]["is_bot"] is True
+    # Andreas and bobijam.
+    assert data["human_participant_count"] == 2
+    # bobijam: Andreas owns it.
+    assert data["people_besides_owner"] == 1

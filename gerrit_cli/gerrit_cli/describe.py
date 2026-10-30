@@ -425,6 +425,7 @@ def get_tool_description() -> ToolDescription:
                 output_fields=[
                     "change_number", "current_patchset", "count",
                     "reviewer_count", "cc_count", "human_participant_count",
+                    "people_besides_owner",
                     "owner", "commit_author",
                     "reviewers[].account_id", "reviewers[].name",
                     "reviewers[].email", "reviewers[].username",
